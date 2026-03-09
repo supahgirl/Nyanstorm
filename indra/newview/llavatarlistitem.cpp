@@ -54,6 +54,10 @@
 #include "llavatarlist.h"
 #include "lggcontactsets.h" // <FS:PP> FIRE-32748 Colorize Friends List with Contact Sets
 
+#include "lggcontactsets.h"
+#include "llviewerobjectlist.h"
+#include "llvoavatar.h"
+
 bool LLAvatarListItem::sStaticInitialized = false;
 S32 LLAvatarListItem::sLeftPadding = 0;
 S32 LLAvatarListItem::sNameRightPadding = 0;

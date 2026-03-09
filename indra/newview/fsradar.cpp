@@ -604,9 +604,22 @@ void FSRadar::updateRadarList()
         entry_options["name_style"] = nameCellStyle;
 
         LLColor4 name_color = colortable.getColor("AvatarListItemIconDefaultColor", LLColor4::white).get();
-        name_color = contactsets->colorize(avId, (sFSRadarColorNamesByDistance ? range_color.get() : name_color), ContactSetType::RADAR);
+        LLColor4 base_color = (sFSRadarColorNamesByDistance ? range_color.get() : name_color);
+        name_color = contactsets->colorize(avId, base_color, ContactSetType::RADAR);
 
         contactsets->hasFriendColorThatShouldShow(avId, ContactSetType::RADAR, name_color);
+
+        if (name_color == base_color && avVo)
+        {
+            if (avVo->getSex() == SEX_FEMALE)
+            {
+                name_color = LLColor4::pink;
+            }
+            else if (avVo->getSex() == SEX_MALE)
+            {
+                name_color = LLColor4::orange;
+            }
+        }
 
         entry_options["name_color"] = name_color.getValue();
 
