@@ -2030,6 +2030,22 @@ LLColor4 LLNetMap::getAvatarColor(const LLUUID& avatar_id)
     // Color based on contact sets prefs
     cs_instance.hasFriendColorThatShouldShow(avatar_id, ContactSetType::MINIMAP, color);
 
+    if (color == map_avatar_color)
+    {
+        LLVOAvatar* avVo = static_cast<LLVOAvatar*>(gObjectList.findObject(avatar_id));
+        if (avVo)
+        {
+            if (avVo->getSex() == SEX_FEMALE)
+            {
+                color = LLColor4::pink;
+            }
+            else if (avVo->getSex() == SEX_MALE)
+            {
+                color = LLColor4::orange;
+            }
+        }
+    }
+
     // Mark Avatars with special colors
     if (auto found = sAvatarMarksMap.find(avatar_id); found != sAvatarMarksMap.end())
     {
