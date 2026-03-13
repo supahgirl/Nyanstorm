@@ -2030,7 +2030,11 @@ LLColor4 LLNetMap::getAvatarColor(const LLUUID& avatar_id)
     // Color based on contact sets prefs
     cs_instance.hasFriendColorThatShouldShow(avatar_id, ContactSetType::MINIMAP, color);
 
-    if (color == map_avatar_color)
+    if (cs_instance.isFriendInAnySet(avatar_id))
+    {
+        color = cs_instance.getFriendColor(avatar_id);
+    }
+    else if (color == map_avatar_color)
     {
         LLVOAvatar* avVo = static_cast<LLVOAvatar*>(gObjectList.findObject(avatar_id));
         if (avVo)
