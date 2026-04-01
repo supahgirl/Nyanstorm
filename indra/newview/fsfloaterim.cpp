@@ -40,6 +40,7 @@
 #include "fsnearbychathub.h"    // <FS:Zi> FIRE-24133 - Redirect chat channel messages
 #include "fspanelimcontrolpanel.h"
 #include "llagent.h"
+#include "llagentui.h"
 #include "llappviewer.h"
 #include "llautoreplace.h"
 #include "llavataractions.h"
@@ -368,7 +369,8 @@ void FSFloaterIM::sendMsgFromInputEditor(EChatType type)
 {
     if (gAgent.isGodlike()
         || (mDialog != IM_NOTHING_SPECIAL)
-        || !mOtherParticipantUUID.isNull())
+        || !mOtherParticipantUUID.isNull()
+        || (mSessionID == AI_AGENT_SESSION_ID))
     {
         // <FS:Techwolf Lupindo> fsdata support
         if (mDialog == IM_NOTHING_SPECIAL && FSData::instance().isSupport(mOtherParticipantUUID) && FSData::instance().isAgentFlag(gAgentID, FSData::NO_SUPPORT))
@@ -617,6 +619,15 @@ void FSFloaterIM::sendMsg(const std::string& msg)
         }
     }
     // [/RLVa:KB]
+
+	if (mSessionID == AI_AGENT_SESSION_ID)
+	{
+		std::string from;
+		LLAgentUI::buildFullname(from);
+		LLIMModel::instance().addMessage(mSessionID, from, gAgent.getID(), utf8_text);
+		updateMessages();
+		return;
+	}
 
     if (mSessionInitialized)
     {
@@ -2280,6 +2291,8 @@ void FSFloaterIM::sRemoveTypingIndicator(const LLSD& data)
 
 void FSFloaterIM::onNewIMReceived(const LLUUID& session_id)
 {
+	if (session_id == AI_AGENT_SESSION_ID) return;
+
     if (isChatMultiTab())
     {
         if (FSFloaterIM::findInstance(session_id))

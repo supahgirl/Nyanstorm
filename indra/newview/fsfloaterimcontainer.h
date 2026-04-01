@@ -129,11 +129,14 @@ protected:
 
 };
 
-class FSFloaterAIAgent : public LLFloater
+#include "fsfloaterim.h"
+extern const LLUUID AI_AGENT_SESSION_ID;
+
+class FSFloaterAIAgent : public FSFloaterIM
 {
 public:
-    FSFloaterAIAgent(const LLSD& key) : LLFloater(key) {}
-    bool postBuild() override { return true; }
+	FSFloaterAIAgent(const LLUUID& session_id);
+    bool postBuild() override;
     static FSFloaterAIAgent* getInstance();
 };
 
