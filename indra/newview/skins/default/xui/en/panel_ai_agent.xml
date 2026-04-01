@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<floater
+ name="panel_ai_agent"
+ title="AI Agent"
+ layout="topleft"
+ follows="all"
+ height="400"
+ width="400"
+ single_instance="true"
+ can_tear_off="true"
+ save_visibility="true">
+  <text name="ai_agent_text" follows="all" layout="topleft" left="10" top="10">
+    AI Agent Interface (Draft)
+  </text>
+</floater>

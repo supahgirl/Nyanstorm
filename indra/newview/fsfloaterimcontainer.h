@@ -129,4 +129,12 @@ protected:
 
 };
 
+class FSFloaterAIAgent : public LLFloater
+{
+public:
+    FSFloaterAIAgent(const LLSD& key) : LLFloater(key) {}
+    bool postBuild() override { return true; }
+    static FSFloaterAIAgent* getInstance();
+};
+
 #endif // FS_FLOATERIMCONTAINER_H
