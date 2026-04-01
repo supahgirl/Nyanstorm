@@ -41,6 +41,7 @@
 #include "lltoolbarview.h"
 #include "llurlregistry.h"
 #include "llvoiceclient.h"
+#include "fsnearbychathub.h"
 
 // <FS:PP> Restore open IMs from previous session
 #include "llconversationlog.h"
@@ -143,6 +144,12 @@ void FSFloaterIMContainer::initTabs()
         {
             addFloater(floater_chat, true, IM_NOTHING_SPECIAL);
         }
+    }
+
+    LLFloater* floater_ai = FSFloaterAIAgent::getInstance();
+    if (floater_ai && !LLFloater::isVisible(floater_ai) && (floater_ai->getHost() != this))
+    {
+        addFloater(floater_ai, true, IM_NOTHING_SPECIAL);
     }
 }
 
@@ -790,5 +797,11 @@ void FSFloaterIMContainer::restoreOpenIMs()
     }
 }
 // </FS:PP>
+
+// static
+FSFloaterAIAgent* FSFloaterAIAgent::getInstance()
+{
+    return LLFloaterReg::getTypedInstance<FSFloaterAIAgent>("panel_ai_agent");
+}
 
 // EOF
