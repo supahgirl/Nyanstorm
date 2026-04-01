@@ -42,6 +42,9 @@
 #include "llurlregistry.h"
 #include "llvoiceclient.h"
 #include "fsnearbychathub.h"
+#include "llagentui.h"
+
+const LLUUID AI_AGENT_SESSION_ID("6a0f6a0f-6a0f-6a0f-6a0f-6a0f6a0f6a0f");
 
 // <FS:PP> Restore open IMs from previous session
 #include "llconversationlog.h"
@@ -143,6 +146,20 @@ void FSFloaterIMContainer::initTabs()
         else
         {
             addFloater(floater_chat, true, IM_NOTHING_SPECIAL);
+        }
+    }
+
+    if (gIMMgr)
+    {
+        // Ensure the AI Agent session exists in the model
+        if (!LLIMModel::instance().findIMSession(AI_AGENT_SESSION_ID))
+        {
+            LLIMModel::instance().newSession(AI_AGENT_SESSION_ID, "AI Agent", IM_NOTHING_SPECIAL, LLUUID::null);
+        }
+        LLIMModel::LLIMSession* session = LLIMModel::instance().findIMSession(AI_AGENT_SESSION_ID);
+        if (session)
+        {
+            session->mSessionInitialized = true;
         }
     }
 
@@ -799,9 +816,21 @@ void FSFloaterIMContainer::restoreOpenIMs()
 // </FS:PP>
 
 // static
+FSFloaterAIAgent::FSFloaterAIAgent(const LLUUID& session_id)
+  : FSFloaterIM(session_id)
+{
+}
+
+bool FSFloaterAIAgent::postBuild()
+{
+	bool result = FSFloaterIM::postBuild();
+	setTitle("AI Agent");
+	return result;
+}
+
 FSFloaterAIAgent* FSFloaterAIAgent::getInstance()
 {
-    return LLFloaterReg::getTypedInstance<FSFloaterAIAgent>("panel_ai_agent");
+	return LLFloaterReg::getTypedInstance<FSFloaterAIAgent>("panel_ai_agent", AI_AGENT_SESSION_ID);
 }
 
 // EOF

@@ -335,6 +335,15 @@ void LLFloaterIMSession::sendMsg(const std::string& msg)
     }
 // [/RLVa:KB]
 
+	if (mSessionID == AI_AGENT_SESSION_ID)
+	{
+		std::string from;
+		LLAgentUI::buildFullname(from);
+		LLIMModel::instance().addMessage(mSessionID, from, gAgent.getID(), utf8_text);
+		updateMessages();
+		return;
+	}
+
     if (mSessionInitialized)
     {
         LLIMModel::sendMessage(utf8_text, mSessionID, mOtherParticipantUUID, mDialog);
