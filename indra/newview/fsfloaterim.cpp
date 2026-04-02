@@ -41,6 +41,13 @@
 #include "fspanelimcontrolpanel.h"
 #include "llagent.h"
 #include "llagentui.h"
+#include "llhttpconstants.h"
+#include "llcorehttputil.h"
+#include "fscorehttputil.h"
+#include "llsdjson.h"
+#include <boost/json.hpp>
+#include <boost/bind/bind.hpp>
+#include <string>
 #include "llappviewer.h"
 #include "llautoreplace.h"
 #include "llavataractions.h"
@@ -106,6 +113,168 @@ bool FSFloaterIMTimer::tick()
     return false;
 }
 
+static std::string sMCPSessionID;
+static std::string sPendingMessage;
+
+static void onMCPServerSuccess(const LLUUID& session_id, const LLSD& result);
+static void onMCPServerError(const LLUUID& session_id, const LLSD& result);
+
+static void sendMCPRequest(const LLUUID& session_id, const std::string& text)
+{
+	boost::json::object json_val;
+	json_val["jsonrpc"] = "2.0";
+	json_val["id"] = 1;
+	
+	if (sMCPSessionID.empty())
+	{
+		json_val["method"] = "initialize";
+		boost::json::object params;
+		params["protocolVersion"] = "2024-11-05";
+		params["capabilities"] = boost::json::object();
+		boost::json::object clientInfo;
+		clientInfo["name"] = "Firestorm";
+		clientInfo["version"] = "1.0";
+		params["clientInfo"] = clientInfo;
+		json_val["params"] = params;
+		sPendingMessage = text;
+	}
+	else
+	{
+		json_val["method"] = "tools/call";
+		boost::json::object params;
+		params["name"] = "ask_agent";
+		boost::json::object args;
+		args["prompt"] = text;
+		params["arguments"] = args;
+		json_val["params"] = params;
+	}
+
+	std::string json_str = boost::json::serialize(json_val);
+
+	LLCore::HttpHeaders::ptr_t headers(new LLCore::HttpHeaders());
+	headers->append(HTTP_OUT_HEADER_CONTENT_TYPE, "application/json");
+	headers->append(HTTP_OUT_HEADER_ACCEPT, "application/json, text/event-stream, */*");
+	headers->append("X-SecondLife-UDP-Listen-Port", "0");
+	if (!sMCPSessionID.empty())
+	{
+		headers->append("mcp-session-id", sMCPSessionID);
+	}
+	
+	FSCoreHttpUtil::callbackHttpPostRaw("http://127.0.0.1:3000/mcp", json_str,
+		boost::bind(&onMCPServerSuccess, session_id, boost::placeholders::_1),
+		boost::bind(&onMCPServerError, session_id, boost::placeholders::_1),
+		headers);
+}
+
+static void onMCPServerSuccess(const LLUUID& session_id, const LLSD& result)
+{
+	LLSD http_results = result[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS];
+	LLSD binary_body = result[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS_RAW];
+	std::string body_str;
+	if (binary_body.isBinary())
+	{
+		const LLSD::Binary& data = binary_body.asBinary();
+		body_str.assign((const char*)data.data(), data.size());
+	}
+
+	if (sMCPSessionID.empty())
+	{
+		// Extract session ID from headers
+		LLSD headers = http_results[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS_HEADERS];
+		if (headers.has("mcp-session-id"))
+		{
+			sMCPSessionID = headers["mcp-session-id"].asString();
+			if (!sPendingMessage.empty())
+			{
+				std::string next_msg = sPendingMessage;
+				sPendingMessage.clear();
+				sendMCPRequest(session_id, next_msg);
+				return;
+			}
+		}
+	}
+
+	// Parse SSE if needed
+	std::string json_payload = body_str;
+	size_t data_pos = body_str.find("data: ");
+	if (data_pos != std::string::npos)
+	{
+		json_payload = body_str.substr(data_pos + 6);
+		size_t end_pos = json_payload.find("\n");
+		if (end_pos != std::string::npos)
+		{
+			json_payload = json_payload.substr(0, end_pos);
+		}
+	}
+
+	try {
+		boost::json::value val = boost::json::parse(json_payload);
+		if (val.is_object())
+		{
+			boost::json::object obj = val.as_object();
+			if (obj.contains("result"))
+			{
+				boost::json::value res = obj["result"];
+				if (res.is_object() && res.as_object().contains("content"))
+				{
+					boost::json::value content = res.as_object()["content"];
+					if (content.is_array() && content.as_array().size() > 0)
+					{
+						boost::json::value first = content.as_array()[0];
+						if (first.is_object() && first.as_object().contains("text"))
+						{
+							std::string reply = first.as_object()["text"].as_string().c_str();
+							LLIMModel::instance().addMessage(session_id, "AI Agent", LLUUID::null, reply);
+						}
+					}
+				}
+				else if (res.is_object() && res.as_object().contains("protocolVersion"))
+				{
+					// This was the initialize response, already handled above
+					return;
+				}
+			}
+		}
+	} catch (...) {}
+	
+	FSFloaterIM* instance = FSFloaterIM::findInstance(session_id);
+	if (!instance && session_id == AI_AGENT_SESSION_ID)
+	{
+		instance = LLFloaterReg::findTypedInstance<FSFloaterIM>("panel_ai_agent", session_id);
+	}
+
+	if (instance)
+	{
+		instance->updateMessages();
+	}
+}
+
+static void onMCPServerError(const LLUUID& session_id, const LLSD& result)
+{
+	LLSD http_results = result[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS];
+	std::string error_msg = http_results[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS_MESSAGE].asString();
+	
+	LL_WARNS("FSFloaterIM") << "MCP Server error: " << error_msg << LL_ENDL;
+	LLIMModel::instance().addMessage(session_id, "System", LLUUID::null, "Error communicating with MCP server: " + error_msg);
+	
+	// Reset session on bad request/unauthorized
+	LLCore::HttpStatus status = LLCoreHttpUtil::HttpCoroutineAdapter::getStatusFromLLSD(http_results);
+	if (status.getType() == 400 || status.getType() == 401)
+	{
+		sMCPSessionID.clear();
+	}
+
+	FSFloaterIM* instance = FSFloaterIM::findInstance(session_id);
+	if (!instance && session_id == AI_AGENT_SESSION_ID)
+	{
+		instance = LLFloaterReg::findTypedInstance<FSFloaterIM>("panel_ai_agent", session_id);
+	}
+
+	if (instance)
+	{
+		instance->updateMessages();
+	}
+}
 
 FSFloaterIM::FSFloaterIM(const LLUUID& session_id)
   : LLTransientDockableFloater(NULL, true, session_id),
@@ -625,6 +794,9 @@ void FSFloaterIM::sendMsg(const std::string& msg)
 		std::string from;
 		LLAgentUI::buildFullname(from);
 		LLIMModel::instance().addMessage(mSessionID, from, gAgent.getID(), utf8_text);
+		
+		sendMCPRequest(mSessionID, utf8_text);
+
 		updateMessages();
 		return;
 	}
