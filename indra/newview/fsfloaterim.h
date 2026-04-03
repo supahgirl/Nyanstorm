@@ -305,7 +305,7 @@ private:
     // MCP token streaming
     std::string mStreamingBuffer;        // accumulates tokens during streaming
     bool        mStreamingActive { false }; // true while a stream is in flight
-    boost::signals2::connection mMCPTokenConnection; // LLEventPump subscription
+    // std::thread -> main thread queue overrides mMCPTokenConnection
 
     boost::signals2::connection mRecentEmojisUpdatedCallbackConnection{};
     boost::signals2::connection mEmojiCloseConn{};
