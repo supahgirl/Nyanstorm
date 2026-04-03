@@ -473,7 +473,7 @@ static void onMCPServerSuccess(const LLUUID& session_id, const LLSD& result)
 	// Send the full response into the chat
 	if (!accumulated_reply.empty())
 	{
-		LLIMModel::instance().addMessage(session_id, "AI Agent", LLUUID::null, accumulated_reply);
+		LLIMModel::instance().addMessage(session_id, "AI Agent", AI_AGENT_SESSION_ID, accumulated_reply);
 	}
 
 	// Refresh the floater and force auto-scroll to the bottom
@@ -1578,21 +1578,18 @@ bool FSFloaterIM::onMCPToken(const LLSD& data)
         {
             // First token: create the initial bubble via LLIMModel + updateMessages
             mStreamingActive = true;
-            LLIMModel::instance().addMessage(mSessionID, "AI Agent",
-                                            LLUUID::null, token);
+            
+            // Send an invisible space to create the avatar Name+Link bubble, circumventing the native buddy IM yellow color
+            LLIMModel::instance().addMessage(mSessionID, "AI Agent", AI_AGENT_SESSION_ID, " ");
             updateMessages();
             
             // Standard chat logic clears the typing indicator when a message is received.
             // Since we are streaming and the agent is still "typing", we must restore it here.
             processIMTyping(mSessionID, true);
         }
-        else
 
-        {
-            // Subsequent tokens: append directly to the visible text editor
-            // without creating a new bubble
-            appendStreamingToken(token);
-        }
+        // Append the current token via appendStreamingToken to force the text color to be white
+        appendStreamingToken(token);
     }
     else // [DONE]
     {
