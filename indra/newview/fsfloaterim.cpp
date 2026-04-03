@@ -131,7 +131,40 @@ static std::string sPendingMessage;
 
 static const std::string MCP_STREAM_HOST = "127.0.0.1";
 static const int         MCP_STREAM_PORT = 3001;
-static const std::string MCP_STREAM_PUMP = "MCPTokenStream";
+
+#include <mutex>
+#include <vector>
+#include "llcallbacklist.h"
+
+static std::mutex sMCPMutex;
+static std::vector<LLSD> sMCPEvents;
+
+static void mcpIdleCallback(void* userdata)
+{
+	std::vector<LLSD> events;
+	{
+		std::lock_guard<std::mutex> lock(sMCPMutex);
+		if (!sMCPEvents.empty())
+		{
+			events.swap(sMCPEvents);
+		}
+	}
+	for (const LLSD& ev : events)
+	{
+		LLUUID session = ev["session_id"].asUUID();
+		FSFloaterIM* floater = FSFloaterIM::findInstance(session);
+		if (floater)
+		{
+			floater->onMCPToken(ev);
+		}
+	}
+}
+
+static void queueMCPEvent(const LLUUID& session_id, const std::string& token, bool done)
+{
+	std::lock_guard<std::mutex> lock(sMCPMutex);
+	sMCPEvents.push_back(LLSD().with("session_id", session_id.asString()).with("token", token).with("done", done));
+}
 
 // Context passed into the streaming thread
 struct MCPStreamContext
@@ -152,10 +185,8 @@ static void mcpStreamThreadFunc(MCPStreamContext ctx)
 	int sock = ::socket(AF_INET, SOCK_STREAM, 0);
 	if (sock < 0)
 	{
-		LLEventPumps::instance().obtain(MCP_STREAM_PUMP).post(
-			LLSD().with("session_id", ctx.session_id.asString()).with("token", "[ERROR] socket() failed").with("done", false));
-		LLEventPumps::instance().obtain(MCP_STREAM_PUMP).post(
-			LLSD().with("session_id", ctx.session_id.asString()).with("token", "").with("done", true));
+		queueMCPEvent(ctx.session_id, "[ERROR] socket() failed", false);
+		queueMCPEvent(ctx.session_id, "", true);
 		return;
 	}
 
@@ -167,10 +198,8 @@ static void mcpStreamThreadFunc(MCPStreamContext ctx)
 	if (::connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0)
 	{
 		::close(sock);
-		LLEventPumps::instance().obtain(MCP_STREAM_PUMP).post(
-			LLSD().with("session_id", ctx.session_id.asString()).with("token", "[ERROR] MCP streaming server not reachable on port 3001").with("done", false));
-		LLEventPumps::instance().obtain(MCP_STREAM_PUMP).post(
-			LLSD().with("session_id", ctx.session_id.asString()).with("token", "").with("done", true));
+		queueMCPEvent(ctx.session_id, "[ERROR] MCP streaming server not reachable on port 3001", false);
+		queueMCPEvent(ctx.session_id, "", true);
 		return;
 	}
 
@@ -199,40 +228,27 @@ static void mcpStreamThreadFunc(MCPStreamContext ctx)
 			continue;
 		}
 
-		// --- we have a complete line ---
 		std::string line = line_buf;
 		line_buf.clear();
 
 		if (in_headers)
 		{
-			if (line.empty())
-			{
-				in_headers = false; // end of headers
-			}
-			else if (line.find("Transfer-Encoding: chunked") != std::string::npos)
-			{
-				chunked = true;
-			}
+			if (line.empty()) in_headers = false;
+			else if (line.find("Transfer-Encoding: chunked") != std::string::npos) chunked = true;
 			continue;
 		}
 
-		// In chunked encoding, odd lines are hex chunk sizes — skip them
 		if (chunked)
 		{
-			bool looks_like_size = !line.empty() &&
-				line.find_first_not_of("0123456789abcdefABCDEF") == std::string::npos;
-			if (looks_like_size)
-				continue;
+			bool looks_like_size = !line.empty() && line.find_first_not_of("0123456789abcdefABCDEF") == std::string::npos;
+			if (looks_like_size) continue;
 		}
 
-		// Parse SSE data lines: "data: {...}"
-		if (line.rfind("data: ", 0) != 0)
-			continue;
+		if (line.rfind("data: ", 0) != 0) continue;
 
 		std::string payload = line.substr(6);
 
-		if (payload == "[DONE]")
-			break;
+		if (payload == "[DONE]") break;
 
 		try
 		{
@@ -242,10 +258,7 @@ static void mcpStreamThreadFunc(MCPStreamContext ctx)
 				std::string token = val.as_object()["token"].as_string().c_str();
 				if (!token.empty())
 				{
-					LLEventPumps::instance().obtain(MCP_STREAM_PUMP).post(
-						LLSD().with("session_id", ctx.session_id.asString())
-						      .with("token", LLSD(token))
-						      .with("done", false));
+					queueMCPEvent(ctx.session_id, token, false);
 				}
 			}
 		}
@@ -253,14 +266,18 @@ static void mcpStreamThreadFunc(MCPStreamContext ctx)
 	}
 
 	::close(sock);
-
-	// Signal end-of-stream
-	LLEventPumps::instance().obtain(MCP_STREAM_PUMP).post(
-		LLSD().with("session_id", ctx.session_id.asString()).with("token", LLSD(std::string(""))).with("done", true));
+	queueMCPEvent(ctx.session_id, "", true);
 }
 
 static void sendMCPStreamRequest(const LLUUID& session_id, const std::string& prompt)
 {
+	static bool registered = false;
+	if (!registered)
+	{
+		gIdleCallbacks.addFunction(mcpIdleCallback, nullptr);
+		registered = true;
+	}
+
 	MCPStreamContext ctx;
 	ctx.session_id = session_id;
 	ctx.prompt     = prompt;
@@ -1524,13 +1541,7 @@ bool FSFloaterIM::postBuild()
     //*TODO if session is not initialized yet, add some sort of a warning message like "starting session...blablabla"
     //see LLFloaterIMPanel for how it is done (IB)
 
-    // For the AI Agent session, subscribe to the MCP token stream
-    if (mSessionID == AI_AGENT_SESSION_ID)
-    {
-        mMCPTokenConnection = LLEventPumps::instance().obtain(MCP_STREAM_PUMP).listen(
-            mSessionID.asString(),
-            boost::bind(&FSFloaterIM::onMCPToken, this, boost::placeholders::_1));
-    }
+    // (Old listener removed for cross-thread safety)
 
     // don't call dockable floater functions when chiclets are disabled, it will dock the floater
     // FIRE-9984 -Zi
