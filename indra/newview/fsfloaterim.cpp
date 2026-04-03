@@ -1031,6 +1031,7 @@ void FSFloaterIM::sendMsg(const std::string& msg)
 		}
 		else
 		{
+			processIMTyping(mSessionID, true);
 			sendMCPStreamRequest(mSessionID, utf8_text);
 		}
 		return;
@@ -1557,6 +1558,9 @@ bool FSFloaterIM::onMCPToken(const LLSD& data)
         if (token.empty())
             return false;
 
+        // Reset the typing timeout timer so the indicator doesn't clear during long streams
+        mOtherTypingTimer.reset();
+
         mStreamingBuffer += token;
 
         if (!mStreamingActive)
@@ -1566,8 +1570,13 @@ bool FSFloaterIM::onMCPToken(const LLSD& data)
             LLIMModel::instance().addMessage(mSessionID, "AI Agent",
                                             LLUUID::null, token);
             updateMessages();
+            
+            // Standard chat logic clears the typing indicator when a message is received.
+            // Since we are streaming and the agent is still "typing", we must restore it here.
+            processIMTyping(mSessionID, true);
         }
         else
+
         {
             // Subsequent tokens: append directly to the visible text editor
             // without creating a new bubble
@@ -1576,6 +1585,15 @@ bool FSFloaterIM::onMCPToken(const LLSD& data)
     }
     else // [DONE]
     {
+        processIMTyping(mSessionID, false);
+
+        FSFloaterIMContainer* im_container = FSFloaterIMContainer::getInstance();
+
+        if (im_container && !hasFocus())
+        {
+            im_container->setFloaterFlashing(this, true);
+        }
+
         if (!mStreamingBuffer.empty() && !mStreamingActive)
         {
             // Edge case: DONE without any token (e.g. empty response)
