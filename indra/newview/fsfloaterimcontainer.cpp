@@ -43,6 +43,7 @@
 #include "llvoiceclient.h"
 #include "fsnearbychathub.h"
 #include "llagentui.h"
+#include "llcallingcard.h"
 
 const LLUUID AI_AGENT_SESSION_ID("6a0f6a0f-6a0f-6a0f-6a0f-6a0f6a0f6a0f");
 
@@ -155,6 +156,17 @@ void FSFloaterIMContainer::initTabs()
         if (!LLIMModel::instance().findIMSession(AI_AGENT_SESSION_ID))
         {
             LLIMModel::instance().newSession(AI_AGENT_SESSION_ID, "AI Agent", IM_NOTHING_SPECIAL, LLUUID::null);
+
+            // Inject avatar name into cache 
+            LLAvatarName agent_name;
+            agent_name.fromString("AI Agent");
+            LLAvatarNameCache::instance().insert(AI_AGENT_SESSION_ID, agent_name);
+
+            // Inject into buddy list (Contacts)
+            LLAvatarTracker::buddy_map_t agent_buddy;
+            LLRelationship* rel = new LLRelationship(LLRelationship::GRANT_ONLINE_STATUS, LLRelationship::GRANT_ONLINE_STATUS, true);
+            agent_buddy[AI_AGENT_SESSION_ID] = rel;
+            LLAvatarTracker::instance().addBuddyList(agent_buddy);
         }
         LLIMModel::LLIMSession* session = LLIMModel::instance().findIMSession(AI_AGENT_SESSION_ID);
         if (session)

@@ -291,6 +291,16 @@ void LLAvatarActions::startIM(const LLUUID& id)
     if (id.isNull() || gAgent.getID() == id)
         return;
 
+    if (id == AI_AGENT_SESSION_ID)
+    {
+        if (!LLIMModel::getInstance()->findIMSession(AI_AGENT_SESSION_ID))
+        {
+            LLIMModel::getInstance()->newSession(AI_AGENT_SESSION_ID, "AI Agent", IM_NOTHING_SPECIAL, LLUUID::null);
+        }
+        FSFloaterIM::show(AI_AGENT_SESSION_ID);
+        return;
+    }
+
 // [RLVa:KB] - Checked: 2013-05-09 (RLVa-1.4.9)
     if (!RlvActions::canStartIM(id))
     {
