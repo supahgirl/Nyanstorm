@@ -2017,14 +2017,21 @@ bool FSFloaterIM::toggle(const LLUUID& session_id)
     return true;
 }
 
-//static
 FSFloaterIM* FSFloaterIM::findInstance(const LLUUID& session_id)
 {
+    if (session_id == AI_AGENT_SESSION_ID)
+    {
+        return LLFloaterReg::findTypedInstance<FSFloaterAIAgent>("panel_ai_agent", session_id);
+    }
     return LLFloaterReg::findTypedInstance<FSFloaterIM>("fs_impanel", session_id);
 }
 
 FSFloaterIM* FSFloaterIM::getInstance(const LLUUID& session_id)
 {
+    if (session_id == AI_AGENT_SESSION_ID)
+    {
+        return LLFloaterReg::getTypedInstance<FSFloaterAIAgent>("panel_ai_agent", session_id);
+    }
     return LLFloaterReg::getTypedInstance<FSFloaterIM>("fs_impanel", session_id);
 }
 
