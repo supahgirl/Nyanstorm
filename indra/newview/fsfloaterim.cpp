@@ -116,6 +116,159 @@ bool FSFloaterIMTimer::tick()
 static std::string sMCPSessionID;
 static std::string sPendingMessage;
 
+// ── MCP Streaming (port 3001) ─────────────────────────────────────────────────
+// Slash commands (non-inference) use the MCP protocol on port 3000.
+// Inference prompts are streamed token-by-token via a dedicated SSE endpoint
+// on port 3001, using a raw POSIX socket + std::thread so libcurl buffering
+// doesn't swallow the stream. Tokens arrive on the bg thread and are dispatched
+// to the main thread via LLEventPumps ("MCPTokenStream").
+
+#include <thread>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+
+static const std::string MCP_STREAM_HOST = "127.0.0.1";
+static const int         MCP_STREAM_PORT = 3001;
+static const std::string MCP_STREAM_PUMP = "MCPTokenStream";
+
+// Context passed into the streaming thread
+struct MCPStreamContext
+{
+	LLUUID      session_id;
+	std::string prompt;
+};
+
+static void mcpStreamThreadFunc(MCPStreamContext ctx)
+{
+	// Build JSON body
+	boost::json::object body;
+	body["prompt"]     = ctx.prompt;
+	body["session_id"] = ctx.session_id.asString();
+	std::string json_body = boost::json::serialize(body);
+
+	// Open TCP socket to port 3001
+	int sock = ::socket(AF_INET, SOCK_STREAM, 0);
+	if (sock < 0)
+	{
+		LLEventPumps::instance().obtain(MCP_STREAM_PUMP).post(
+			LLSD().with("session_id", ctx.session_id.asString()).with("token", "[ERROR] socket() failed").with("done", false));
+		LLEventPumps::instance().obtain(MCP_STREAM_PUMP).post(
+			LLSD().with("session_id", ctx.session_id.asString()).with("token", "").with("done", true));
+		return;
+	}
+
+	struct sockaddr_in addr;
+	addr.sin_family = AF_INET;
+	addr.sin_port   = htons(MCP_STREAM_PORT);
+	::inet_pton(AF_INET, MCP_STREAM_HOST.c_str(), &addr.sin_addr);
+
+	if (::connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0)
+	{
+		::close(sock);
+		LLEventPumps::instance().obtain(MCP_STREAM_PUMP).post(
+			LLSD().with("session_id", ctx.session_id.asString()).with("token", "[ERROR] MCP streaming server not reachable on port 3001").with("done", false));
+		LLEventPumps::instance().obtain(MCP_STREAM_PUMP).post(
+			LLSD().with("session_id", ctx.session_id.asString()).with("token", "").with("done", true));
+		return;
+	}
+
+	// Build HTTP/1.1 POST request
+	std::string request =
+		"POST /stream HTTP/1.1\r\n"
+		"Host: 127.0.0.1:3001\r\n"
+		"Content-Type: application/json\r\n"
+		"Connection: close\r\n"
+		"Content-Length: " + std::to_string(json_body.size()) + "\r\n"
+		"\r\n" + json_body;
+
+	::send(sock, request.c_str(), request.size(), 0);
+
+	// Read response line by line and parse SSE
+	std::string line_buf;
+	bool in_headers = true;
+	bool chunked    = false;
+	char ch;
+
+	while (::recv(sock, &ch, 1, 0) == 1)
+	{
+		if (ch != '\n')
+		{
+			if (ch != '\r') line_buf += ch;
+			continue;
+		}
+
+		// --- we have a complete line ---
+		std::string line = line_buf;
+		line_buf.clear();
+
+		if (in_headers)
+		{
+			if (line.empty())
+			{
+				in_headers = false; // end of headers
+			}
+			else if (line.find("Transfer-Encoding: chunked") != std::string::npos)
+			{
+				chunked = true;
+			}
+			continue;
+		}
+
+		// In chunked encoding, odd lines are hex chunk sizes — skip them
+		if (chunked)
+		{
+			bool looks_like_size = !line.empty() &&
+				line.find_first_not_of("0123456789abcdefABCDEF") == std::string::npos;
+			if (looks_like_size)
+				continue;
+		}
+
+		// Parse SSE data lines: "data: {...}"
+		if (line.rfind("data: ", 0) != 0)
+			continue;
+
+		std::string payload = line.substr(6);
+
+		if (payload == "[DONE]")
+			break;
+
+		try
+		{
+			boost::json::value val = boost::json::parse(payload);
+			if (val.is_object() && val.as_object().contains("token"))
+			{
+				std::string token = val.as_object()["token"].as_string().c_str();
+				if (!token.empty())
+				{
+					LLEventPumps::instance().obtain(MCP_STREAM_PUMP).post(
+						LLSD().with("session_id", ctx.session_id.asString())
+						      .with("token", LLSD(token))
+						      .with("done", false));
+				}
+			}
+		}
+		catch (...) {}
+	}
+
+	::close(sock);
+
+	// Signal end-of-stream
+	LLEventPumps::instance().obtain(MCP_STREAM_PUMP).post(
+		LLSD().with("session_id", ctx.session_id.asString()).with("token", LLSD(std::string(""))).with("done", true));
+}
+
+static void sendMCPStreamRequest(const LLUUID& session_id, const std::string& prompt)
+{
+	MCPStreamContext ctx;
+	ctx.session_id = session_id;
+	ctx.prompt     = prompt;
+	std::thread(mcpStreamThreadFunc, ctx).detach();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 static void onMCPServerSuccess(const LLUUID& session_id, const LLSD& result);
 static void onMCPServerError(const LLUUID& session_id, const LLSD& result);
 
@@ -194,27 +347,46 @@ static void onMCPServerSuccess(const LLUUID& session_id, const LLSD& result)
 		}
 	}
 
-	// Parse SSE if needed
-	std::string json_payload = body_str;
-	size_t data_pos = body_str.find("data: ");
-	if (data_pos != std::string::npos)
-	{
-		json_payload = body_str.substr(data_pos + 6);
-		size_t end_pos = json_payload.find("\n");
-		if (end_pos != std::string::npos)
-		{
-			json_payload = json_payload.substr(0, end_pos);
-		}
-	}
+	// --- SSE streaming parser ---
+	// Iterates over ALL "data: ..." lines in the body and accumulates text fragments.
+	// Handles both simple JSON responses and multi-line SSE streams.
+	std::string accumulated_reply;
+	std::istringstream sse_stream(body_str);
+	std::string sse_line;
+	bool found_sse_data = false;
 
-	try {
-		boost::json::value val = boost::json::parse(json_payload);
-		if (val.is_object())
+	while (std::getline(sse_stream, sse_line))
+	{
+		// Trim carriage return (Windows line ending)
+		if (!sse_line.empty() && sse_line.back() == '\r')
+			sse_line.pop_back();
+
+		if (sse_line.rfind("data: ", 0) != 0)
+			continue; // Not a data line (event:, id:, empty...)
+
+		found_sse_data = true;
+		std::string json_payload = sse_line.substr(6); // skip "data: "
+
+		if (json_payload == "[DONE]")
+			break; // OpenAI end-of-stream sentinel
+
+		try
 		{
+			boost::json::value val = boost::json::parse(json_payload);
+			if (!val.is_object())
+				continue;
+
 			boost::json::object obj = val.as_object();
+
 			if (obj.contains("result"))
 			{
 				boost::json::value res = obj["result"];
+
+				// Initialize response (protocolVersion) — ignore
+				if (res.is_object() && res.as_object().contains("protocolVersion"))
+					continue;
+
+				// tools/call response: result.content[0].text
 				if (res.is_object() && res.as_object().contains("content"))
 				{
 					boost::json::value content = res.as_object()["content"];
@@ -223,20 +395,71 @@ static void onMCPServerSuccess(const LLUUID& session_id, const LLSD& result)
 						boost::json::value first = content.as_array()[0];
 						if (first.is_object() && first.as_object().contains("text"))
 						{
-							std::string reply = first.as_object()["text"].as_string().c_str();
-							LLIMModel::instance().addMessage(session_id, "AI Agent", LLUUID::null, reply);
+							accumulated_reply += first.as_object()["text"].as_string().c_str();
 						}
 					}
 				}
-				else if (res.is_object() && res.as_object().contains("protocolVersion"))
+			}
+			// Delta OpenAI-compatible : choices[0].delta.content
+			else if (obj.contains("choices"))
+			{
+				boost::json::value choices = obj["choices"];
+				if (choices.is_array() && choices.as_array().size() > 0)
 				{
-					// This was the initialize response, already handled above
-					return;
+					boost::json::value choice = choices.as_array()[0];
+					if (choice.is_object() && choice.as_object().contains("delta"))
+					{
+						boost::json::value delta = choice.as_object()["delta"];
+						if (delta.is_object() && delta.as_object().contains("content"))
+						{
+							boost::json::value content = delta.as_object()["content"];
+							if (content.is_string())
+								accumulated_reply += content.as_string().c_str();
+						}
+					}
 				}
 			}
 		}
-	} catch (...) {}
-	
+		catch (...) {}
+	}
+
+	// Fallback: if no SSE line found, parse the full body as JSON
+	if (!found_sse_data && !body_str.empty())
+	{
+		try
+		{
+			boost::json::value val = boost::json::parse(body_str);
+			if (val.is_object())
+			{
+				boost::json::object obj = val.as_object();
+				if (obj.contains("result"))
+				{
+					boost::json::value res = obj["result"];
+					if (res.is_object() && res.as_object().contains("content"))
+					{
+						boost::json::value content = res.as_object()["content"];
+						if (content.is_array() && content.as_array().size() > 0)
+						{
+							boost::json::value first = content.as_array()[0];
+							if (first.is_object() && first.as_object().contains("text"))
+							{
+								accumulated_reply = first.as_object()["text"].as_string().c_str();
+							}
+						}
+					}
+				}
+			}
+		}
+		catch (...) {}
+	}
+
+	// Send the full response into the chat
+	if (!accumulated_reply.empty())
+	{
+		LLIMModel::instance().addMessage(session_id, "AI Agent", LLUUID::null, accumulated_reply);
+	}
+
+	// Refresh the floater and force auto-scroll to the bottom
 	FSFloaterIM* instance = FSFloaterIM::findInstance(session_id);
 	if (!instance && session_id == AI_AGENT_SESSION_ID)
 	{
@@ -246,6 +469,9 @@ static void onMCPServerSuccess(const LLUUID& session_id, const LLSD& result)
 	if (instance)
 	{
 		instance->updateMessages();
+
+		// Auto-scroll: automatically scroll to the bottom after each agent response
+		instance->scrollChatToEnd();
 	}
 }
 
@@ -794,10 +1020,19 @@ void FSFloaterIM::sendMsg(const std::string& msg)
 		std::string from;
 		LLAgentUI::buildFullname(from);
 		LLIMModel::instance().addMessage(mSessionID, from, gAgent.getID(), utf8_text);
-		
-		sendMCPRequest(mSessionID, utf8_text);
-
 		updateMessages();
+
+		// Slash-commands go via MCP protocol (port 3000)
+		// Inference prompts are streamed token-by-token via port 3001
+		bool is_slash_command = utf8_text.size() > 0 && utf8_text[0] == '/';
+		if (is_slash_command)
+		{
+			sendMCPRequest(mSessionID, utf8_text);
+		}
+		else
+		{
+			sendMCPStreamRequest(mSessionID, utf8_text);
+		}
 		return;
 	}
 
@@ -1288,6 +1523,14 @@ bool FSFloaterIM::postBuild()
     //*TODO if session is not initialized yet, add some sort of a warning message like "starting session...blablabla"
     //see LLFloaterIMPanel for how it is done (IB)
 
+    // For the AI Agent session, subscribe to the MCP token stream
+    if (mSessionID == AI_AGENT_SESSION_ID)
+    {
+        mMCPTokenConnection = LLEventPumps::instance().obtain(MCP_STREAM_PUMP).listen(
+            mSessionID.asString(),
+            boost::bind(&FSFloaterIM::onMCPToken, this, boost::placeholders::_1));
+    }
+
     // don't call dockable floater functions when chiclets are disabled, it will dock the floater
     // FIRE-9984 -Zi
     if (isChatMultiTab() || disable_chiclets)
@@ -1299,6 +1542,76 @@ bool FSFloaterIM::postBuild()
         return LLDockableFloater::postBuild();
     }
 }
+
+bool FSFloaterIM::onMCPToken(const LLSD& data)
+{
+    // Verify this event is for our session
+    if (data["session_id"].asString() != mSessionID.asString())
+        return false;
+
+    bool done = data["done"].asBoolean();
+
+    if (!done)
+    {
+        std::string token = data["token"].asString();
+        if (token.empty())
+            return false;
+
+        mStreamingBuffer += token;
+
+        if (!mStreamingActive)
+        {
+            // First token: create the initial bubble via LLIMModel + updateMessages
+            mStreamingActive = true;
+            LLIMModel::instance().addMessage(mSessionID, "AI Agent",
+                                            LLUUID::null, token);
+            updateMessages();
+        }
+        else
+        {
+            // Subsequent tokens: append directly to the visible text editor
+            // without creating a new bubble
+            appendStreamingToken(token);
+        }
+    }
+    else // [DONE]
+    {
+        if (!mStreamingBuffer.empty() && !mStreamingActive)
+        {
+            // Edge case: DONE without any token (e.g. empty response)
+            LLIMModel::instance().addMessage(mSessionID, "AI Agent",
+                                            LLUUID::null, mStreamingBuffer);
+            updateMessages();
+        }
+        // Note: we do NOT call updateMessages() here to avoid wiping the
+        // directly-appended text. LLIMModel already has the first token;
+        // the full text is visible in the widget.
+        mStreamingBuffer.clear();
+        mStreamingActive = false;
+    }
+    return false; // keep the pump connection alive
+}
+
+void FSFloaterIM::appendStreamingToken(const std::string& token)
+{
+    if (!mChatHistory || token.empty())
+        return;
+
+    // Match the font and colour used by FSChatHistory::appendMessage()
+    // so the streamed tokens look identical to the initial bubble text.
+    LLFontGL* fontp     = LLViewerChat::getChatFont();
+    LLUIColor txt_color = LLUIColorTable::instance().getColor("White");
+
+    LLStyle::Params style;
+    style.color(txt_color);
+    style.readonly_color(txt_color);
+    style.font.name(LLFontGL::nameFromFont(fontp));
+    style.font.size(LLFontGL::sizeFromFont(fontp));
+
+    mChatHistory->appendText(token, false, style);
+}
+
+
 
 void FSFloaterIM::updateSessionName(const std::string& ui_title,
                                     const std::string& ui_label)
@@ -1879,6 +2192,14 @@ void FSFloaterIM::reloadMessages(bool clean_messages/* = false*/)
     mChatHistory->clear();
     mLastMessageIndex = -1;
     updateMessages();
+}
+
+void FSFloaterIM::scrollChatToEnd()
+{
+    if (mChatHistory)
+    {
+        mChatHistory->setCursorAndScrollToEnd();
+    }
 }
 
 void FSFloaterIM::onInputEditorFocusReceived()

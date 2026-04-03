@@ -95,6 +95,9 @@ public:
     // get new messages from LLIMModel
     void updateMessages();
     void reloadMessages(bool clean_messages = false);
+    void scrollChatToEnd();
+    bool onMCPToken(const LLSD& data); // called on main thread for each streaming token
+    void appendStreamingToken(const std::string& token); // append text to current bubble
     void sendMsgFromInputEditor(EChatType type);
     void sendMsg(const std::string& msg);
 
@@ -298,6 +301,11 @@ private:
     bool mApplyRect;
 
     FSFloaterIMTimer*   mIMFloaterTimer;
+
+    // MCP token streaming
+    std::string mStreamingBuffer;        // accumulates tokens during streaming
+    bool        mStreamingActive { false }; // true while a stream is in flight
+    boost::signals2::connection mMCPTokenConnection; // LLEventPump subscription
 
     boost::signals2::connection mRecentEmojisUpdatedCallbackConnection{};
     boost::signals2::connection mEmojiCloseConn{};
