@@ -130,7 +130,7 @@ static std::string sPendingMessage;
 #include <unistd.h>
 
 static const std::string MCP_STREAM_HOST = "127.0.0.1";
-static const int         MCP_STREAM_PORT = 3001;
+static const int         MCP_STREAM_PORT = 3000;
 
 #include <mutex>
 #include <vector>
@@ -198,7 +198,7 @@ static void mcpStreamThreadFunc(MCPStreamContext ctx)
 	if (::connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0)
 	{
 		::close(sock);
-		queueMCPEvent(ctx.session_id, "[ERROR] MCP streaming server not reachable on port 3001", false);
+		queueMCPEvent(ctx.session_id, "[ERROR] MCP streaming server not reachable on port 3000", false);
 		queueMCPEvent(ctx.session_id, "", true);
 		return;
 	}
@@ -206,7 +206,7 @@ static void mcpStreamThreadFunc(MCPStreamContext ctx)
 	// Build HTTP/1.1 POST request
 	std::string request =
 		"POST /stream HTTP/1.1\r\n"
-		"Host: 127.0.0.1:3001\r\n"
+		"Host: 127.0.0.1:3000\r\n"
 		"Content-Type: application/json\r\n"
 		"Connection: close\r\n"
 		"Content-Length: " + std::to_string(json_body.size()) + "\r\n"
@@ -1040,7 +1040,7 @@ void FSFloaterIM::sendMsg(const std::string& msg)
 		updateMessages();
 
 		// Slash-commands go via MCP protocol (port 3000)
-		// Inference prompts are streamed token-by-token via port 3001
+		// Inference prompts are streamed token-by-token via port 3000
 		bool is_slash_command = utf8_text.size() > 0 && utf8_text[0] == '/';
 		if (is_slash_command)
 		{
