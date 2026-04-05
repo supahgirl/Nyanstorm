@@ -2,6 +2,28 @@
 <llsd xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
   xsi:noNamespaceSchemaLocation="llsd.xsd">
 <map>
+  <key>FSAIAgentName1</key>
+  <map>
+    <key>Comment</key>
+    <string>Name of the first AI Agent (Agent 1)</string>
+    <key>Persist</key>
+    <integer>1</integer>
+    <key>Type</key>
+    <string>String</string>
+    <key>Value</key>
+    <string>AI Agent</string>
+  </map>
+  <key>FSAIAgentName2</key>
+  <map>
+    <key>Comment</key>
+    <string>Name of the second AI Agent (Agent 2)</string>
+    <key>Persist</key>
+    <integer>1</integer>
+    <key>Type</key>
+    <string>String</string>
+    <key>Value</key>
+    <string>AI Agent 2</string>
+  </map>
   <key>FSLandmarkCreatedNotification</key>
   <map>
     <key>Comment</key>

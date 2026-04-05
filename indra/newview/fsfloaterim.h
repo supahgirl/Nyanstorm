@@ -253,6 +253,7 @@ private:
     void initEmojiRecentPanel();
     void onRecentEmojiPicked(const LLSD& value);
 
+protected:
     FSPanelChatControlPanel* mControlPanel;
     LLUUID mSessionID;
     S32 mLastMessageIndex;
@@ -260,6 +261,8 @@ private:
 
     EInstantMessage mDialog;
     LLUUID mOtherParticipantUUID;
+
+private:
     FSChatHistory* mChatHistory;
     LLChatEntry* mInputEditor;
     LLLayoutPanel* mChatLayoutPanel;

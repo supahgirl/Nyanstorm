@@ -315,6 +315,7 @@ static void sendMCPRequest(const LLUUID& session_id, const std::string& text)
 		params["name"] = "ask_agent";
 		boost::json::object args;
 		args["prompt"] = text;
+		args["session_id"] = session_id.asString();
 		params["arguments"] = args;
 		json_val["params"] = params;
 	}
@@ -473,12 +474,18 @@ static void onMCPServerSuccess(const LLUUID& session_id, const LLSD& result)
 	// Send the full response into the chat
 	if (!accumulated_reply.empty())
 	{
-		LLIMModel::instance().addMessage(session_id, "AI Agent", AI_AGENT_SESSION_ID, accumulated_reply);
+		std::string sender_name = (session_id == AI_AGENT_SESSION_ID) ? "AI Agent" : "AI Agent 2";
+		if (session_id == AI_AGENT_SESSION_ID && gSavedSettings.controlExists("FSAIAgentName1"))
+			sender_name = gSavedSettings.getString("FSAIAgentName1");
+		else if (session_id == AI_AGENT_2_SESSION_ID && gSavedSettings.controlExists("FSAIAgentName2"))
+			sender_name = gSavedSettings.getString("FSAIAgentName2");
+
+		LLIMModel::instance().addMessage(session_id, sender_name, session_id, accumulated_reply);
 	}
 
 	// Refresh the floater and force auto-scroll to the bottom
 	FSFloaterIM* instance = FSFloaterIM::findInstance(session_id);
-	if (!instance && session_id == AI_AGENT_SESSION_ID)
+	if (!instance && (session_id == AI_AGENT_SESSION_ID || session_id == AI_AGENT_2_SESSION_ID))
 	{
 		instance = LLFloaterReg::findTypedInstance<FSFloaterIM>("panel_ai_agent", session_id);
 	}
@@ -508,7 +515,7 @@ static void onMCPServerError(const LLUUID& session_id, const LLSD& result)
 	}
 
 	FSFloaterIM* instance = FSFloaterIM::findInstance(session_id);
-	if (!instance && session_id == AI_AGENT_SESSION_ID)
+	if (!instance && (session_id == AI_AGENT_SESSION_ID || session_id == AI_AGENT_2_SESSION_ID))
 	{
 		instance = LLFloaterReg::findTypedInstance<FSFloaterIM>("panel_ai_agent", session_id);
 	}
@@ -782,7 +789,7 @@ void FSFloaterIM::sendMsgFromInputEditor(EChatType type)
     if (gAgent.isGodlike()
         || (mDialog != IM_NOTHING_SPECIAL)
         || !mOtherParticipantUUID.isNull()
-        || (mSessionID == AI_AGENT_SESSION_ID))
+        || (mSessionID == AI_AGENT_SESSION_ID || mSessionID == AI_AGENT_2_SESSION_ID))
     {
         // <FS:Techwolf Lupindo> fsdata support
         if (mDialog == IM_NOTHING_SPECIAL && FSData::instance().isSupport(mOtherParticipantUUID) && FSData::instance().isAgentFlag(gAgentID, FSData::NO_SUPPORT))
@@ -1032,7 +1039,7 @@ void FSFloaterIM::sendMsg(const std::string& msg)
     }
     // [/RLVa:KB]
 
-	if (mSessionID == AI_AGENT_SESSION_ID)
+	if (mSessionID == AI_AGENT_SESSION_ID || mSessionID == AI_AGENT_2_SESSION_ID)
 	{
 		std::string from;
 		LLAgentUI::buildFullname(from);
@@ -1580,7 +1587,13 @@ bool FSFloaterIM::onMCPToken(const LLSD& data)
             mStreamingActive = true;
             
             // Send an invisible space to create the avatar Name+Link bubble, circumventing the native buddy IM yellow color
-            LLIMModel::instance().addMessage(mSessionID, "AI Agent", AI_AGENT_SESSION_ID, " ");
+			std::string sender_name = (mSessionID == AI_AGENT_SESSION_ID) ? "AI Agent" : "AI Agent 2";
+			if (mSessionID == AI_AGENT_SESSION_ID && gSavedSettings.controlExists("FSAIAgentName1"))
+				sender_name = gSavedSettings.getString("FSAIAgentName1");
+			else if (mSessionID == AI_AGENT_2_SESSION_ID && gSavedSettings.controlExists("FSAIAgentName2"))
+				sender_name = gSavedSettings.getString("FSAIAgentName2");
+
+			LLIMModel::instance().addMessage(mSessionID, sender_name, mSessionID, " ");
             updateMessages();
             
             // Standard chat logic clears the typing indicator when a message is received.
@@ -2027,7 +2040,7 @@ bool FSFloaterIM::toggle(const LLUUID& session_id)
 
 FSFloaterIM* FSFloaterIM::findInstance(const LLUUID& session_id)
 {
-    if (session_id == AI_AGENT_SESSION_ID)
+    if (session_id == AI_AGENT_SESSION_ID || session_id == AI_AGENT_2_SESSION_ID)
     {
         return LLFloaterReg::findTypedInstance<FSFloaterAIAgent>("panel_ai_agent", session_id);
     }
@@ -2036,7 +2049,7 @@ FSFloaterIM* FSFloaterIM::findInstance(const LLUUID& session_id)
 
 FSFloaterIM* FSFloaterIM::getInstance(const LLUUID& session_id)
 {
-    if (session_id == AI_AGENT_SESSION_ID)
+    if (session_id == AI_AGENT_SESSION_ID || session_id == AI_AGENT_2_SESSION_ID)
     {
         return LLFloaterReg::getTypedInstance<FSFloaterAIAgent>("panel_ai_agent", session_id);
     }
@@ -2817,7 +2830,7 @@ void FSFloaterIM::sRemoveTypingIndicator(const LLSD& data)
 
 void FSFloaterIM::onNewIMReceived(const LLUUID& session_id)
 {
-	if (session_id == AI_AGENT_SESSION_ID) return;
+	if (session_id == AI_AGENT_SESSION_ID || session_id == AI_AGENT_2_SESSION_ID) return;
 
     if (isChatMultiTab())
     {

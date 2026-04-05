@@ -335,7 +335,7 @@ void LLFloaterIMSession::sendMsg(const std::string& msg)
     }
 // [/RLVa:KB]
 
-	if (mSessionID == AI_AGENT_SESSION_ID)
+	if (mSessionID == AI_AGENT_SESSION_ID || mSessionID == AI_AGENT_2_SESSION_ID)
 	{
 		std::string from;
 		LLAgentUI::buildFullname(from);
