@@ -46,6 +46,7 @@
 #include "llcallingcard.h"
 
 const LLUUID AI_AGENT_SESSION_ID("6a0f6a0f-6a0f-6a0f-6a0f-6a0f6a0f6a0f");
+const LLUUID AI_AGENT_2_SESSION_ID("6a0f6a0f-6a0f-6a0f-6a0f-6a0f6a0f6a1f");
 
 // <FS:PP> Restore open IMs from previous session
 #include "llconversationlog.h"
@@ -152,26 +153,41 @@ void FSFloaterIMContainer::initTabs()
 
     if (gIMMgr)
     {
-        // Ensure the AI Agent session exists in the model
-        if (!LLIMModel::instance().findIMSession(AI_AGENT_SESSION_ID))
-        {
-            LLIMModel::instance().newSession(AI_AGENT_SESSION_ID, "AI Agent", IM_NOTHING_SPECIAL, LLUUID::null);
+        const LLUUID agent_ids[] = { AI_AGENT_SESSION_ID, AI_AGENT_2_SESSION_ID };
+        const std::string name_settings[] = { "FSAIAgentName1", "FSAIAgentName2" };
+        const std::string default_names[] = { "AI Agent", "AI Agent 2" };
 
-            // Inject avatar name into cache 
-            LLAvatarName agent_name;
-            agent_name.fromString("AI Agent");
-            LLAvatarNameCache::instance().insert(AI_AGENT_SESSION_ID, agent_name);
-
-            // Inject into buddy list (Contacts)
-            LLAvatarTracker::buddy_map_t agent_buddy;
-            LLRelationship* rel = new LLRelationship(LLRelationship::GRANT_ONLINE_STATUS, LLRelationship::GRANT_ONLINE_STATUS, true);
-            agent_buddy[AI_AGENT_SESSION_ID] = rel;
-            LLAvatarTracker::instance().addBuddyList(agent_buddy);
-        }
-        LLIMModel::LLIMSession* session = LLIMModel::instance().findIMSession(AI_AGENT_SESSION_ID);
-        if (session)
+        for (int i = 0; i < 2; ++i)
         {
-            session->mSessionInitialized = true;
+            const LLUUID& id = agent_ids[i];
+            std::string name = default_names[i];
+            if (gSavedSettings.controlExists(name_settings[i]))
+            {
+                name = gSavedSettings.getString(name_settings[i]);
+            }
+
+            if (!LLIMModel::instance().findIMSession(id))
+            {
+                LLIMModel::instance().newSession(id, name, IM_NOTHING_SPECIAL, LLUUID::null);
+
+                // Inject avatar name into cache 
+                LLAvatarName agent_name;
+                agent_name.fromString(name);
+                LLAvatarNameCache::instance().insert(id, agent_name);
+
+                // Inject into buddy list (Contacts)
+                LLAvatarTracker::buddy_map_t agent_buddy;
+                LLRelationship* rel = new LLRelationship(LLRelationship::GRANT_ONLINE_STATUS, LLRelationship::GRANT_ONLINE_STATUS, true);
+                agent_buddy[id] = rel;
+                LLAvatarTracker::instance().addBuddyList(agent_buddy);
+            }
+            LLIMModel::LLIMSession* session = LLIMModel::instance().findIMSession(id);
+            if (session)
+            {
+                session->mSessionInitialized = true;
+                // Update name in case it changed in settings
+                session->mName = name;
+            }
         }
     }
 
@@ -836,7 +852,14 @@ FSFloaterAIAgent::FSFloaterAIAgent(const LLUUID& session_id)
 bool FSFloaterAIAgent::postBuild()
 {
 	bool result = FSFloaterIM::postBuild();
-	setTitle("AI Agent");
+	
+	std::string name = (mSessionID == AI_AGENT_2_SESSION_ID) ? "AI Agent 2" : "AI Agent";
+	if (mSessionID == AI_AGENT_SESSION_ID && gSavedSettings.controlExists("FSAIAgentName1"))
+		name = gSavedSettings.getString("FSAIAgentName1");
+	else if (mSessionID == AI_AGENT_2_SESSION_ID && gSavedSettings.controlExists("FSAIAgentName2"))
+		name = gSavedSettings.getString("FSAIAgentName2");
+
+	setTitle(name);
 	return result;
 }
 

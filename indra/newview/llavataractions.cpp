@@ -291,13 +291,19 @@ void LLAvatarActions::startIM(const LLUUID& id)
     if (id.isNull() || gAgent.getID() == id)
         return;
 
-    if (id == AI_AGENT_SESSION_ID)
+    if (id == AI_AGENT_SESSION_ID || id == AI_AGENT_2_SESSION_ID)
     {
-        if (!LLIMModel::getInstance()->findIMSession(AI_AGENT_SESSION_ID))
+        if (!LLIMModel::getInstance()->findIMSession(id))
         {
-            LLIMModel::getInstance()->newSession(AI_AGENT_SESSION_ID, "AI Agent", IM_NOTHING_SPECIAL, LLUUID::null);
+            std::string name = (id == AI_AGENT_SESSION_ID) ? "AI Agent" : "AI Agent 2";
+            if (id == AI_AGENT_SESSION_ID && gSavedSettings.controlExists("FSAIAgentName1"))
+                name = gSavedSettings.getString("FSAIAgentName1");
+            else if (id == AI_AGENT_2_SESSION_ID && gSavedSettings.controlExists("FSAIAgentName2"))
+                name = gSavedSettings.getString("FSAIAgentName2");
+
+            LLIMModel::getInstance()->newSession(id, name, IM_NOTHING_SPECIAL, LLUUID::null);
         }
-        FSFloaterIM::show(AI_AGENT_SESSION_ID);
+        FSFloaterIM::show(id);
         return;
     }
 

@@ -131,6 +131,7 @@ protected:
 
 #include "fsfloaterim.h"
 extern const LLUUID AI_AGENT_SESSION_ID;
+extern const LLUUID AI_AGENT_2_SESSION_ID;
 
 class FSFloaterAIAgent : public FSFloaterIM
 {
