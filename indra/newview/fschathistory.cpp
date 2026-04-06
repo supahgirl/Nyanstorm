@@ -1467,7 +1467,7 @@ void FSChatHistory::appendInlineMarkdown(const std::string& text, bool prepend_n
 {
 	if (text.empty())
 	{
-		if (prepend_newline) appendText("", true, params);
+		if (prepend_newline) appendText("\n", false, params);
 		return;
 	}
 
@@ -1591,6 +1591,24 @@ void FSChatHistory::appendMarkdownText(const std::string& text, bool prepend_new
 			continue;
 		}
 
+		// Detect headings (lines starting with one or more #)
+		if (!trimmed.empty() && trimmed[0] == '#')
+		{
+			size_t level = 0;
+			while (level < trimmed.size() && trimmed[level] == '#') ++level;
+			// Must be followed by a space to be a real heading
+			if (level < trimmed.size() && trimmed[level] == ' ')
+			{
+				std::string heading_text = trimmed.substr(level + 1);
+				bool prepend_nl = (prepend_newline && first_line) || !first_line;
+				LLStyle::Params heading_params(params);
+				heading_params.font.style("BOLD");
+				appendInlineMarkdown(heading_text, prepend_nl, heading_params);
+				first_line = false;
+				continue;
+			}
+		}
+
 		// Detect tables (must have at least two pipes to be considered a table)
 		size_t first_pipe = line.find('|');
 		size_t second_pipe = (first_pipe != std::string::npos) ? line.find('|', first_pipe + 1) : std::string::npos;
@@ -1646,7 +1664,9 @@ void FSChatHistory::appendMarkdownText(const std::string& text, bool prepend_new
 			continue;
 		}
 
-		bool use_monospace = mMarkdownInCodeBlock || mMarkdownInTable;
+		// Non-table line — exit table mode so next table gets proper separation
+		mMarkdownInTable = false;
+		bool use_monospace = mMarkdownInCodeBlock;
 		bool prepend_nl = (prepend_newline && first_line) || !first_line;
 
 		if (use_monospace)
@@ -1696,7 +1716,13 @@ void FSChatHistory::appendMessage(const LLChat& chat, const LLSD &args, const LL
     F32 alpha = 1.f;
     LLUIColor txt_color = LLUIColorTable::instance().getColor("White");
     LLUIColor name_color = LLUIColorTable::instance().getColor("ChatNameColor");
-    LLViewerChat::getChatColor(chat, txt_color, alpha, LLSD().with("is_local", is_local));
+    // Skip contact colorization for AI agent sessions (synthetic UUIDs that may match friend list)
+    static const LLUUID AI_SESSION_1("6a0f6a0f-6a0f-6a0f-6a0f-6a0f6a0f6a0f");
+    static const LLUUID AI_SESSION_2("6a0f6a0f-6a0f-6a0f-6a0f-6a0f6a0f6a1f");
+    if (chat.mFromID != AI_SESSION_1 && chat.mFromID != AI_SESSION_2)
+    {
+        LLViewerChat::getChatColor(chat, txt_color, alpha, LLSD().with("is_local", is_local));
+    }
     LLFontGL* fontp = LLViewerChat::getChatFont();
     std::string font_name = LLFontGL::nameFromFont(fontp);
     std::string font_size = LLFontGL::sizeFromFont(fontp);
