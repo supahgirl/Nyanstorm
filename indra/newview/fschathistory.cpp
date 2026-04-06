@@ -1290,7 +1290,9 @@ FSChatHistory::FSChatHistory(const FSChatHistory::Params& p)
     mChatInputLine(NULL),   // <FS_Zi> FIRE-8602: Typing in chat history focuses chat input line
     mIsLastMessageFromLog(false),
     mScrollToBottom(false),
-    mUnreadChatSources(0)
+    mUnreadChatSources(0),
+    mMarkdownInCodeBlock(false),
+    mMarkdownInTable(false)
 {
     mLineSpacingPixels = llclamp(gSavedSettings.getS32("FSFontChatLineSpacingPixels"), 0, 36);
     mTextVAlign = LLFontGL::VAlign::VCENTER;
@@ -1460,6 +1462,211 @@ std::string applyModeratorStyle(U32 moderator_style)
 }
 
 static LLTrace::BlockTimerStatHandle FTM_APPEND_MESSAGE("Append Chat Message");
+
+void FSChatHistory::appendInlineMarkdown(const std::string& text, bool prepend_newline, const LLStyle::Params& params)
+{
+	if (text.empty())
+	{
+		if (prepend_newline) appendText("", true, params);
+		return;
+	}
+
+	LLStyle::Params current_params(params);
+	std::string current_text = text;
+
+	bool is_bold = false;
+	bool is_italic = false;
+	bool is_code = false;
+
+	size_t pos = 0;
+	bool first_append = true;
+
+	while (pos < current_text.length())
+	{
+		size_t next_delim = std::string::npos;
+		int delim_len = 0;
+		int type = 0; // 1: ***, 2: **, 3: *, 4: `
+
+		size_t p_bi = current_text.find("***", pos);
+		size_t p_b = current_text.find("**", pos);
+		size_t p_i = current_text.find("*", pos);
+		size_t p_c = current_text.find("`", pos);
+
+		// Find the minimum position
+		next_delim = std::string::npos;
+		if (p_bi != std::string::npos) next_delim = p_bi;
+		if (p_b != std::string::npos && (next_delim == std::string::npos || p_b < next_delim)) next_delim = p_b;
+		if (p_i != std::string::npos && (next_delim == std::string::npos || p_i < next_delim)) next_delim = p_i;
+		if (p_c != std::string::npos && (next_delim == std::string::npos || p_c < next_delim)) next_delim = p_c;
+
+		if (next_delim == std::string::npos)
+		{
+			appendText(current_text.substr(pos), first_append && prepend_newline, current_params);
+			break;
+		}
+
+		if (next_delim > pos)
+		{
+			appendText(current_text.substr(pos, next_delim - pos), first_append && prepend_newline, current_params);
+			first_append = false;
+			prepend_newline = false;
+		}
+
+		// Determine the type at next_delim (longest match first)
+		if (next_delim == p_bi) { delim_len = 3; type = 1; }
+		else if (next_delim == p_b) { delim_len = 2; type = 2; }
+		else if (next_delim == p_i) { delim_len = 1; type = 3; }
+		else if (next_delim == p_c) { delim_len = 1; type = 4; }
+
+		// Update style state
+		if (type == 1) { is_bold = !is_bold; is_italic = !is_italic; }
+		else if (type == 2) { is_bold = !is_bold; }
+		else if (type == 3) { is_italic = !is_italic; }
+		else if (type == 4) { is_code = !is_code; }
+
+		std::string new_style = "";
+		if (is_bold && is_italic) new_style = "BOLDITALIC";
+		else if (is_bold) new_style = "BOLD";
+		else if (is_italic) new_style = "ITALIC";
+		else new_style = "NORMAL";
+
+		current_params.font.style(new_style);
+
+		if (is_code)
+		{
+			current_params.color(LLUIColorTable::instance().getColor("EmphasisColor"));
+			current_params.font.name("Monospace");
+		}
+		else
+		{
+			current_params.color(params.color());
+			current_params.font.name(params.font.name());
+		}
+
+		pos = next_delim + delim_len;
+	}
+}
+
+void FSChatHistory::appendMarkdownText(const std::string& text, bool prepend_newline, const LLStyle::Params& params)
+{
+	if (text.empty()) return;
+
+	std::vector<std::string> lines;
+	size_t start = 0;
+	size_t end = text.find('\n');
+	while (end != std::string::npos)
+	{
+		lines.push_back(text.substr(start, end - start));
+		start = end + 1;
+		end = text.find('\n', start);
+	}
+	lines.push_back(text.substr(start));
+
+	bool first_line = true;
+
+	for (const std::string& line : lines)
+	{
+		std::string trimmed = line;
+		LLStringUtil::trim(trimmed);
+
+		// Use a more robust check for the code block delimiter
+		size_t code_pos = line.find("```");
+		if (code_pos != std::string::npos)
+		{
+			// If there's text before the backticks (like "Amaterasu: "), append it
+			if (code_pos > 0)
+			{
+				std::string before = line.substr(0, code_pos);
+				bool prepend_nl = (prepend_newline && first_line) || !first_line;
+				appendInlineMarkdown(before, prepend_nl, params);
+				first_line = false;
+			}
+			mMarkdownInCodeBlock = !mMarkdownInCodeBlock;
+
+			// Force a newline if we are starting a block
+			if (mMarkdownInCodeBlock && !first_line)
+			{
+				appendText("\n", false, params);
+			}
+			continue;
+		}
+
+		// Detect tables (must have at least two pipes to be considered a table)
+		size_t first_pipe = line.find('|');
+		size_t second_pipe = (first_pipe != std::string::npos) ? line.find('|', first_pipe + 1) : std::string::npos;
+		
+		if (first_pipe != std::string::npos && second_pipe != std::string::npos)
+		{
+			// Style for the table
+			LLStyle::Params block_params(params);
+			block_params.font.name("Monospace");
+			LLUIColor code_color = LLUIColorTable::instance().getColor("EmphasisColor");
+			block_params.color(code_color);
+			block_params.readonly_color(code_color);
+
+			// If there's text before the table, append it first
+			if (first_pipe > 0)
+			{
+				std::string before = line.substr(0, first_pipe);
+				bool prepend_nl = (prepend_newline && first_line) || !first_line;
+				appendInlineMarkdown(before, prepend_nl, params);
+			}
+
+			// Transition to table mode
+			if (!mMarkdownInTable)
+			{
+				mMarkdownInTable = true;
+				// Force table onto a NEW line
+				appendText("\n", false, block_params);
+			}
+			
+			std::string table_content = line.substr(first_pipe);
+			
+			// Handle compact tables by splitting at "||"
+			size_t sub_start = 0;
+			size_t sub_end = table_content.find("||");
+			while (sub_end != std::string::npos)
+			{
+				std::string sub_line = table_content.substr(sub_start, sub_end - sub_start);
+				// Ensure each row ends with a newline
+				appendText(sub_line + "\n", false, block_params);
+				
+				sub_start = sub_end + 2; // skip "||"
+				sub_end = table_content.find("||", sub_start);
+			}
+			
+			// Last part of the table
+			std::string last_part = table_content.substr(sub_start);
+			if (!last_part.empty())
+			{
+				appendText(last_part + "\n", false, block_params);
+			}
+			
+			first_line = false;
+			continue;
+		}
+
+		bool use_monospace = mMarkdownInCodeBlock || mMarkdownInTable;
+		bool prepend_nl = (prepend_newline && first_line) || !first_line;
+
+		if (use_monospace)
+		{
+			LLStyle::Params block_params(params);
+			block_params.font.name("Monospace");
+			LLUIColor code_color = LLUIColorTable::instance().getColor("EmphasisColor");
+			block_params.color(code_color);
+			block_params.readonly_color(code_color);
+
+			appendText(line, prepend_nl, block_params);
+			first_line = false;
+		}
+		else
+		{
+			appendInlineMarkdown(line, prepend_nl, params);
+			first_line = false;
+		}
+	}
+}
 
 void FSChatHistory::appendMessage(const LLChat& chat, const LLSD &args, const LLStyle::Params& input_append_params)
 {
@@ -1840,6 +2047,9 @@ void FSChatHistory::appendMessage(const LLChat& chat, const LLSD &args, const LL
         mIsLastMessageFromLog = message_from_log;
     }
 
+    mMarkdownInCodeBlock = false;
+    mMarkdownInTable = false;
+
     // body of the message processing
 
     // notify processing
@@ -1943,7 +2153,7 @@ void FSChatHistory::appendMessage(const LLChat& chat, const LLSD &args, const LL
         bool is_trusted = isContentTrusted();
         setContentTrusted(chat.mFromID.isNull() && is_p2p); // <FS:Ansariel> Set trusted content temporarily for system messages
         setPlainText((use_plain_text_chat_history && is_p2p) ? chat.mFromID.notNull() : use_plain_text_chat_history);
-        appendText(message, prependNewLineState, body_message_params);  // <FS:Zi> FIRE-8600: TAB out of chat history
+        appendMarkdownText(message, prependNewLineState, body_message_params);  // <FS:Zi> FIRE-8600: TAB out of chat history
         setContentTrusted(is_trusted);
         setPlainText(use_plain_text_chat_history);
         // Uncomment this if we never need to append to the end of a message. [FS:CR]

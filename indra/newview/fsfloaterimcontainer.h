@@ -138,7 +138,7 @@ class FSFloaterAIAgent : public FSFloaterIM
 public:
 	FSFloaterAIAgent(const LLUUID& session_id);
     bool postBuild() override;
-    static FSFloaterAIAgent* getInstance();
+    static FSFloaterAIAgent* getInstance(const LLUUID& session_id = AI_AGENT_SESSION_ID);
 };
 
 #endif // FS_FLOATERIMCONTAINER_H
