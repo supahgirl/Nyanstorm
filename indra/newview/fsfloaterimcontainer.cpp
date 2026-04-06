@@ -151,9 +151,9 @@ void FSFloaterIMContainer::initTabs()
         }
     }
 
+    const LLUUID agent_ids[] = { AI_AGENT_SESSION_ID, AI_AGENT_2_SESSION_ID };
     if (gIMMgr)
     {
-        const LLUUID agent_ids[] = { AI_AGENT_SESSION_ID, AI_AGENT_2_SESSION_ID };
         const std::string name_settings[] = { "FSAIAgentName1", "FSAIAgentName2" };
         const std::string default_names[] = { "AI Agent", "AI Agent 2" };
 
@@ -191,11 +191,14 @@ void FSFloaterIMContainer::initTabs()
         }
     }
 
-    LLFloater* floater_ai = FSFloaterAIAgent::getInstance();
-    if (floater_ai && !LLFloater::isVisible(floater_ai) && (floater_ai->getHost() != this))
-    {
-        addFloater(floater_ai, true, IM_NOTHING_SPECIAL);
-    }
+	for (int i = 0; i < 2; ++i)
+	{
+		FSFloaterIM* floater_ai = FSFloaterIM::getInstance(agent_ids[i]);
+		if (floater_ai && !LLFloater::isVisible(floater_ai) && (floater_ai->getHost() != this))
+		{
+			addFloater(floater_ai, i == 0, IM_NOTHING_SPECIAL);
+		}
+	}
 }
 
 // [SL:KB] - Patch: UI-TabRearrange | Checked: 2012-05-05 (Catznip-3.3.0)
@@ -847,6 +850,7 @@ void FSFloaterIMContainer::restoreOpenIMs()
 FSFloaterAIAgent::FSFloaterAIAgent(const LLUUID& session_id)
   : FSFloaterIM(session_id)
 {
+	setIsSingleInstance(false);
 }
 
 bool FSFloaterAIAgent::postBuild()
@@ -863,9 +867,9 @@ bool FSFloaterAIAgent::postBuild()
 	return result;
 }
 
-FSFloaterAIAgent* FSFloaterAIAgent::getInstance()
+FSFloaterAIAgent* FSFloaterAIAgent::getInstance(const LLUUID& session_id)
 {
-	return LLFloaterReg::getTypedInstance<FSFloaterAIAgent>("panel_ai_agent", AI_AGENT_SESSION_ID);
+	return LLFloaterReg::getTypedInstance<FSFloaterAIAgent>("panel_ai_agent", session_id);
 }
 
 // EOF

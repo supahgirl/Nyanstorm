@@ -27,6 +27,10 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "llpreviewnotecard.h"
+#include "fsfloaterim.h"
+#include "fsfloaterimcontainer.h"
+#include "llmenugl.h"
+#include "llviewermenu.h"
 
 #include "llinventory.h"
 
@@ -87,6 +91,7 @@ LLPreviewNotecard::LLPreviewNotecard(const LLSD& key) //const LLUUID& item_id,
     {
         mAssetID = item->getAssetUUID();
     }
+    mTargetAgentID = AI_AGENT_SESSION_ID;
 }
 
 LLPreviewNotecard::~LLPreviewNotecard()
@@ -128,6 +133,18 @@ bool LLPreviewNotecard::postBuild()
 
     // <FS:Ansariel> FIRE-13969: Search button
     getChild<LLButton>("Search")->setClickedCallback(boost::bind(&LLPreviewNotecard::onSearchButtonClicked, this));
+    mAgentBtn = getChild<LLButton>("Agent");
+    if (mAgentBtn)
+    {
+        mAgentBtn->setClickedCallback(boost::bind(&LLPreviewNotecard::onAgentButtonClicked, this));
+    }
+
+    mSendBtn = getChild<LLButton>("Send");
+    if (mSendBtn)
+    {
+        mSendBtn->setClickedCallback(boost::bind(&LLPreviewNotecard::onSendButtonClicked, this));
+    }
+    onSelectAgent(LLSD("agent1"));
 
     const LLInventoryItem* item = getItem();
 
@@ -945,6 +962,79 @@ std::string LLPreviewNotecard::getTmpFileName()
 void LLPreviewNotecard::onSearchButtonClicked()
 {
     LLFloaterSearchReplace::show(getEditor());
+}
+
+void LLPreviewNotecard::onAgentButtonClicked()
+{
+    if (!mAgentBtn) return;
+
+    S32 x, y;
+    mAgentBtn->localPointToScreen(0, 0, &x, &y);
+
+    const widget_registry_t& registry = LLViewerMenuHolderGL::child_registry_t::instance();
+    LLContextMenu* menu = LLUICtrlFactory::createFromFile<LLContextMenu>("menu_notecard_agents.xml", gMenuHolder, registry);
+    if (menu)
+    {
+        LLMenuItemCallGL* item1 = menu->getChild<LLMenuItemCallGL>("Agent 1");
+        if (item1)
+        {
+            std::string name = "AI Agent 1";
+            if (gSavedSettings.controlExists("FSAIAgentName1")) name = gSavedSettings.getString("FSAIAgentName1");
+            item1->setLabel(name);
+            item1->setCommitCallback(boost::bind(&LLPreviewNotecard::onSelectAgent, this, LLSD("agent1")));
+        }
+
+        LLMenuItemCallGL* item2 = menu->getChild<LLMenuItemCallGL>("Agent 2");
+        if (item2)
+        {
+            std::string name = "AI Agent 2";
+            if (gSavedSettings.controlExists("FSAIAgentName2")) name = gSavedSettings.getString("FSAIAgentName2");
+            item2->setLabel(name);
+            item2->setCommitCallback(boost::bind(&LLPreviewNotecard::onSelectAgent, this, LLSD("agent2")));
+        }
+
+        menu->show(x, y);
+    }
+}
+
+void LLPreviewNotecard::onSelectAgent(const LLSD& userdata)
+{
+    std::string agent = userdata.asString();
+    if (agent == "agent1")
+    {
+        mTargetAgentID = AI_AGENT_SESSION_ID;
+    }
+    else
+    {
+        mTargetAgentID = AI_AGENT_2_SESSION_ID;
+    }
+
+    if (mSendBtn)
+    {
+        std::string name = (mTargetAgentID == AI_AGENT_SESSION_ID) ? "Agent 1" : "Agent 2";
+        if (mTargetAgentID == AI_AGENT_SESSION_ID && gSavedSettings.controlExists("FSAIAgentName1"))
+            name = gSavedSettings.getString("FSAIAgentName1");
+        else if (mTargetAgentID == AI_AGENT_2_SESSION_ID && gSavedSettings.controlExists("FSAIAgentName2"))
+            name = gSavedSettings.getString("FSAIAgentName2");
+
+        mSendBtn->setToolTip("Send to " + name);
+    }
+}
+
+void LLPreviewNotecard::onSendButtonClicked()
+{
+    if (mEditor)
+    {
+        std::string text = mEditor->getText();
+        if (!text.empty())
+        {
+            FSFloaterIM* im = FSFloaterIM::show(mTargetAgentID);
+            if (im)
+            {
+                im->sendMsg(text);
+            }
+        }
+    }
 }
 // </FS:Ansariel>
 

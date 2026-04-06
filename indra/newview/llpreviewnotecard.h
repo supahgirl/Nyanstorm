@@ -117,6 +117,9 @@ protected:
     static void finishTaskUpload(LLUUID itemId, LLUUID newAssetId, LLUUID taskId);
     // <FS:Ansariel> FIRE-13969: Search button
     void onSearchButtonClicked();
+    void onAgentButtonClicked();
+    void onSendButtonClicked();
+    void onSelectAgent(const LLSD& userdata);
 
     void openInExternalEditor();
     bool onExternalChange(const std::string& filename);
@@ -135,8 +138,12 @@ protected:
     LLLineEditor* mDescEditor = nullptr;
     LLButton* mSaveBtn = nullptr;
     LLButton* mEditBtn = nullptr;
+    LLButton* mAgentBtn = nullptr;
+    LLButton* mSendBtn = nullptr;
     LLButton* mDeleteBtn = nullptr;
     LLUICtrl* mLockBtn = nullptr;
+
+    LLUUID mTargetAgentID;
 
     LLUUID mAssetID;
 

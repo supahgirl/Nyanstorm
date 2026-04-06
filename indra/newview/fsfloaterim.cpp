@@ -1580,13 +1580,14 @@ bool FSFloaterIM::onMCPToken(const LLSD& data)
         mOtherTypingTimer.reset();
 
         mStreamingBuffer += token;
+        mStreamingLineBuffer += token;
 
         if (!mStreamingActive)
         {
             // First token: create the initial bubble via LLIMModel + updateMessages
             mStreamingActive = true;
             
-            // Send an invisible space to create the avatar Name+Link bubble, circumventing the native buddy IM yellow color
+            // Send an invisible space to create the avatar Name+Link bubble
 			std::string sender_name = (mSessionID == AI_AGENT_SESSION_ID) ? "AI Agent" : "AI Agent 2";
 			if (mSessionID == AI_AGENT_SESSION_ID && gSavedSettings.controlExists("FSAIAgentName1"))
 				sender_name = gSavedSettings.getString("FSAIAgentName1");
@@ -1596,20 +1597,30 @@ bool FSFloaterIM::onMCPToken(const LLSD& data)
 			LLIMModel::instance().addMessage(mSessionID, sender_name, mSessionID, " ");
             updateMessages();
             
-            // Standard chat logic clears the typing indicator when a message is received.
-            // Since we are streaming and the agent is still "typing", we must restore it here.
             processIMTyping(mSessionID, true);
         }
 
-        // Append the current token via appendStreamingToken to force the text color to be white
-        appendStreamingToken(token);
+        // Process complete lines from the line buffer
+        size_t newline_pos;
+        while ((newline_pos = mStreamingLineBuffer.find('\n')) != std::string::npos)
+        {
+            std::string line = mStreamingLineBuffer.substr(0, newline_pos + 1);
+            appendStreamingToken(line);
+            mStreamingLineBuffer.erase(0, newline_pos + 1);
+        }
     }
     else // [DONE]
     {
+        // Process any remaining fragment in the line buffer
+        if (!mStreamingLineBuffer.empty())
+        {
+            appendStreamingToken(mStreamingLineBuffer);
+            mStreamingLineBuffer.clear();
+        }
+
         processIMTyping(mSessionID, false);
 
         FSFloaterIMContainer* im_container = FSFloaterIMContainer::getInstance();
-
         if (im_container && !hasFocus())
         {
             im_container->setFloaterFlashing(this, true);
@@ -1622,9 +1633,6 @@ bool FSFloaterIM::onMCPToken(const LLSD& data)
                                             LLUUID::null, mStreamingBuffer);
             updateMessages();
         }
-        // Note: we do NOT call updateMessages() here to avoid wiping the
-        // directly-appended text. LLIMModel already has the first token;
-        // the full text is visible in the widget.
         mStreamingBuffer.clear();
         mStreamingActive = false;
     }
@@ -1636,8 +1644,6 @@ void FSFloaterIM::appendStreamingToken(const std::string& token)
     if (!mChatHistory || token.empty())
         return;
 
-    // Match the font and colour used by FSChatHistory::appendMessage()
-    // so the streamed tokens look identical to the initial bubble text.
     LLFontGL* fontp     = LLViewerChat::getChatFont();
     LLUIColor txt_color = LLUIColorTable::instance().getColor("White");
 
@@ -1647,7 +1653,8 @@ void FSFloaterIM::appendStreamingToken(const std::string& token)
     style.font.name(LLFontGL::nameFromFont(fontp));
     style.font.size(LLFontGL::sizeFromFont(fontp));
 
-    mChatHistory->appendText(token, false, style);
+    // Use appendMarkdownText instead of appendText to support tables/code blocks
+    mChatHistory->appendMarkdownText(token, false, style);
 }
 
 

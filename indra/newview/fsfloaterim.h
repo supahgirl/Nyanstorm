@@ -307,6 +307,7 @@ private:
 
     // MCP token streaming
     std::string mStreamingBuffer;        // accumulates tokens during streaming
+    std::string mStreamingLineBuffer;    // accumulates tokens until a newline is reached
     bool        mStreamingActive { false }; // true while a stream is in flight
     // std::thread -> main thread queue overrides mMCPTokenConnection
 

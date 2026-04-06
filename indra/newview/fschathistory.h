@@ -123,6 +123,7 @@ class FSChatHistory : public LLTextEditor   // <FS:Zi> FIRE-8600: TAB out of cha
          * @param input_append_params - font style.
          */
         void appendMessage(const LLChat& chat, const LLSD &args = LLSD(), const LLStyle::Params& input_append_params = LLStyle::Params());
+        void appendMarkdownText(const std::string& text, bool prepend_newline, const LLStyle::Params& params);
         void clear() override;
         void draw() override;
 
@@ -138,6 +139,9 @@ class FSChatHistory : public LLTextEditor   // <FS:Zi> FIRE-8600: TAB out of cha
         LLDate mLastMessageTime;
         bool mIsLastMessageFromLog;
         bool mScrollToBottom;
+
+        bool mMarkdownInCodeBlock;
+        bool mMarkdownInTable;
 
         std::string mMessageHeaderFilename;
         std::string mMessageSeparatorFilename;
@@ -158,6 +162,8 @@ class FSChatHistory : public LLTextEditor   // <FS:Zi> FIRE-8600: TAB out of cha
 
         S32 mUnreadChatSources;
         unread_messages_update_callback_t mUnreadMessagesUpdateSignal;
+
+        void appendInlineMarkdown(const std::string& text, bool prepend_newline, const LLStyle::Params& params);
 
     // <FS_Zi> FIRE-8602: Typing in chat history focuses chat input line
     public:
