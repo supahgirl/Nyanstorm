@@ -145,6 +145,7 @@ extern std::mutex                    sDiscordMutex;
 LLUUID      discordUUID(const std::string& discord_id);
 bool        isDiscordSession(const LLUUID& session_id);
 std::string getDiscordDisplayName(const LLUUID& session_id);
+void        discordUpdateStatusFromRelay(const std::string& status);
 
 class FSFloaterAIAgent : public FSFloaterIM
 {

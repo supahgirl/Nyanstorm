@@ -184,6 +184,11 @@
 #include "llvovolume.h"
 #include "particleeditor.h"
 #include "permissionstracker.h"
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include "fsfloaterimcontainer.h"
+#include <boost/json.hpp>
 
 using namespace LLAvatarAppearanceDefines;
 
@@ -12657,6 +12662,58 @@ class FSCheckRenderAvatarComplexityMode : public view_listener_t
 };
 // <FS:Ansariel>
 
+// ── Discord status ─────────────────────────────────────────────────────────────
+static std::string sDiscordStatus = "online"; // online | idle | invisible
+
+static void discord_send_status(const std::string& status)
+{
+    std::thread([status]()
+    {
+        boost::json::object body;
+        body["status"] = status;
+        std::string json_body = boost::json::serialize(body);
+
+        int sock = ::socket(AF_INET, SOCK_STREAM, 0);
+        if (sock < 0) return;
+
+        struct sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_port   = htons(3002);
+        ::inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+
+        if (::connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) { ::close(sock); return; }
+
+        std::string request =
+            "POST /discord_status HTTP/1.1\r\n"
+            "Host: 127.0.0.1:3002\r\n"
+            "Content-Type: application/json\r\n"
+            "Connection: close\r\n"
+            "Content-Length: " + std::to_string(json_body.size()) + "\r\n"
+            "\r\n" + json_body;
+
+        ::send(sock, request.c_str(), request.size(), 0);
+        ::close(sock);
+    }).detach();
+}
+
+static void handle_discord_set_status(const LLSD& param)
+{
+    std::string status = param.asString();
+    sDiscordStatus = status;
+    discord_send_status(status);
+}
+
+static bool handle_discord_check_status(LLUICtrl* /*ctrl*/, const LLSD& param)
+{
+    return sDiscordStatus == param.asString();
+}
+
+// Called from fsfloaterim when a status_update event arrives via SSE
+void discordUpdateStatusFromRelay(const std::string& status)
+{
+    sDiscordStatus = status;
+}
+
 void initialize_menus()
 {
     // A parameterized event handler used as ctrl-8/9/0 zoom controls below.
@@ -13367,4 +13424,8 @@ void initialize_menus()
     // <FS:Ansariel> Add avater complexity sttings to menu
     view_listener_t::addMenu(new FSRenderAvatarComplexityMode(), "World.RenderAvatarComplexityMode");
     view_listener_t::addMenu(new FSCheckRenderAvatarComplexityMode(), "World.CheckRenderAvatarComplexityMode");
+
+    // ── Discord status menu ────────────────────────────────────────────────────
+    commit.add("Discord.SetStatus",   boost::bind(&handle_discord_set_status,   _2));
+    enable.add("Discord.CheckStatus", boost::bind(&handle_discord_check_status, _1, _2));
 }
