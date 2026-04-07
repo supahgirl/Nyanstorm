@@ -130,8 +130,21 @@ protected:
 };
 
 #include "fsfloaterim.h"
+#include <map>
+#include <mutex>
+#include <string>
+
 extern const LLUUID AI_AGENT_SESSION_ID;
 extern const LLUUID AI_AGENT_2_SESSION_ID;
+
+// ── Discord session registry ──────────────────────────────────────────────────
+extern std::map<LLUUID, std::string> sDiscordSessions;   // real_session_id → display_name
+extern std::map<LLUUID, LLUUID>      sDiscordOriginalUUIDs; // real_session_id → original discord UUID
+extern std::mutex                    sDiscordMutex;
+
+LLUUID      discordUUID(const std::string& discord_id);
+bool        isDiscordSession(const LLUUID& session_id);
+std::string getDiscordDisplayName(const LLUUID& session_id);
 
 class FSFloaterAIAgent : public FSFloaterIM
 {

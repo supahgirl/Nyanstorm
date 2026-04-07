@@ -44,9 +44,40 @@
 #include "fsnearbychathub.h"
 #include "llagentui.h"
 #include "llcallingcard.h"
+#include "llmd5.h"
 
 const LLUUID AI_AGENT_SESSION_ID("6a0f6a0f-6a0f-6a0f-6a0f-6a0f6a0f6a0f");
 const LLUUID AI_AGENT_2_SESSION_ID("6a0f6a0f-6a0f-6a0f-6a0f-6a0f6a0f6a1f");
+
+// ── Discord session registry ──────────────────────────────────────────────────
+std::map<LLUUID, std::string> sDiscordSessions;
+std::map<LLUUID, LLUUID>      sDiscordOriginalUUIDs;
+std::mutex                    sDiscordMutex;
+
+LLUUID discordUUID(const std::string& discord_id)
+{
+    // Deterministic UUID from Discord user ID — must match discord_relay.py
+    std::string key = "discord:" + discord_id;
+    LLMD5 md5;
+    md5.update((const U8*)key.c_str(), (U32)key.size());
+    md5.finalize();
+    LLUUID result;
+    md5.raw_digest(result.mData);
+    return result;
+}
+
+bool isDiscordSession(const LLUUID& session_id)
+{
+    std::lock_guard<std::mutex> lk(sDiscordMutex);
+    return sDiscordSessions.count(session_id) > 0;
+}
+
+std::string getDiscordDisplayName(const LLUUID& session_id)
+{
+    std::lock_guard<std::mutex> lk(sDiscordMutex);
+    auto it = sDiscordSessions.find(session_id);
+    return (it != sDiscordSessions.end()) ? it->second : "Discord";
+}
 
 // <FS:PP> Restore open IMs from previous session
 #include "llconversationlog.h"

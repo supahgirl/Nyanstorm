@@ -65,6 +65,7 @@
 #endif
 
 #include "fscommon.h"
+#include "fsfloaterimcontainer.h"
 #include "llchatentry.h"
 #include "llfocusmgr.h"
 #include "llkeyboard.h"
@@ -1618,7 +1619,7 @@ void FSChatHistory::appendMarkdownText(const std::string& text, bool prepend_new
 			// Style for the table
 			LLStyle::Params block_params(params);
 			block_params.font.name("Monospace");
-			LLUIColor code_color = LLUIColorTable::instance().getColor("EmphasisColor");
+			LLUIColor code_color = LLUIColorTable::instance().getColor("AIChatTableColor");
 			block_params.color(code_color);
 			block_params.readonly_color(code_color);
 
@@ -1665,6 +1666,12 @@ void FSChatHistory::appendMarkdownText(const std::string& text, bool prepend_new
 		}
 
 		// Non-table line — exit table mode so next table gets proper separation
+		// But skip empty lines that are just \n-split artifacts from a table row token
+		if (trimmed.empty() && mMarkdownInTable)
+		{
+			first_line = false;
+			continue;
+		}
 		mMarkdownInTable = false;
 		bool use_monospace = mMarkdownInCodeBlock;
 		bool prepend_nl = (prepend_newline && first_line) || !first_line;
@@ -1716,10 +1723,11 @@ void FSChatHistory::appendMessage(const LLChat& chat, const LLSD &args, const LL
     F32 alpha = 1.f;
     LLUIColor txt_color = LLUIColorTable::instance().getColor("White");
     LLUIColor name_color = LLUIColorTable::instance().getColor("ChatNameColor");
-    // Skip contact colorization for AI agent sessions (synthetic UUIDs that may match friend list)
+    // Skip contact colorization for AI agent and Discord sessions
     static const LLUUID AI_SESSION_1("6a0f6a0f-6a0f-6a0f-6a0f-6a0f6a0f6a0f");
     static const LLUUID AI_SESSION_2("6a0f6a0f-6a0f-6a0f-6a0f-6a0f6a0f6a1f");
-    if (chat.mFromID != AI_SESSION_1 && chat.mFromID != AI_SESSION_2)
+    if (chat.mFromID != AI_SESSION_1 && chat.mFromID != AI_SESSION_2
+        && !isDiscordSession(chat.mFromID))
     {
         LLViewerChat::getChatColor(chat, txt_color, alpha, LLSD().with("is_local", is_local));
     }
