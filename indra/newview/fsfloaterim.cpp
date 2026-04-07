@@ -282,6 +282,15 @@ static void discordListenerThreadFunc()
 				boost::json::value val = boost::json::parse(payload);
 				if (!val.is_object()) continue;
 				auto& obj = val.as_object();
+
+				// Status update from relay
+				if (obj.contains("status_update"))
+				{
+					std::string status = obj["status_update"].as_string().c_str();
+					discordUpdateStatusFromRelay(status);
+					continue;
+				}
+
 				if (!obj.contains("session_uuid") || !obj.contains("display_name") || !obj.contains("text")) continue;
 
 				std::string uuid_str     = obj["session_uuid"].as_string().c_str();

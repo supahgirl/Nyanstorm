@@ -892,6 +892,45 @@
              parameter="fs_im_container" />
         </menu_item_check>
 
+        <menu
+         label="Discord"
+         layout="topleft"
+         name="Discord">
+            <menu_item_check
+             label="Online"
+             layout="topleft"
+             name="DiscordOnline">
+                <menu_item_check.on_click
+                 function="Discord.SetStatus"
+                 parameter="online" />
+                <menu_item_check.on_check
+                 function="Discord.CheckStatus"
+                 parameter="online" />
+            </menu_item_check>
+            <menu_item_check
+             label="Inactive"
+             layout="topleft"
+             name="DiscordInactive">
+                <menu_item_check.on_click
+                 function="Discord.SetStatus"
+                 parameter="idle" />
+                <menu_item_check.on_check
+                 function="Discord.CheckStatus"
+                 parameter="idle" />
+            </menu_item_check>
+            <menu_item_check
+             label="Invisible"
+             layout="topleft"
+             name="DiscordInvisible">
+                <menu_item_check.on_click
+                 function="Discord.SetStatus"
+                 parameter="invisible" />
+                <menu_item_check.on_check
+                 function="Discord.CheckStatus"
+                 parameter="invisible" />
+            </menu_item_check>
+        </menu>
+
         <menu_item_check
           label="Omnifilter"
           name="Omnifilter">
