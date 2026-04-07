@@ -6,6 +6,9 @@
 	 name="EmphasisColor"
 	 value="1 1 1 1" />
 	<color
+	 name="AIChatTableColor"
+	 value="0 1 1 1" />
+	<color
 	 name="EmphasisColor_13"
 	 value="1 1 1 0.13" />
 	<color

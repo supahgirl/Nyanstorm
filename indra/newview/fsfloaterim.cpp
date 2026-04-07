@@ -139,15 +139,28 @@ static const int         MCP_STREAM_PORT = 3000;
 static std::mutex sMCPMutex;
 static std::vector<LLSD> sMCPEvents;
 
+// ── Discord relay integration ─────────────────────────────────────────────────
+
+static const int    DISCORD_RELAY_PORT = 3002;
+static const char*  DISCORD_RELAY_HOST = "127.0.0.1";
+
+struct DiscordMessage
+{
+	LLUUID      session_uuid;
+	std::string display_name;
+	std::string text;
+};
+
+static std::mutex                  sDiscordQueueMutex;
+static std::vector<DiscordMessage> sDiscordQueue;
+
 static void mcpIdleCallback(void* userdata)
 {
+	// ── MCP (AI agent) events ─────────────────────────────────────────────────
 	std::vector<LLSD> events;
 	{
 		std::lock_guard<std::mutex> lock(sMCPMutex);
-		if (!sMCPEvents.empty())
-		{
-			events.swap(sMCPEvents);
-		}
+		if (!sMCPEvents.empty()) events.swap(sMCPEvents);
 	}
 	for (const LLSD& ev : events)
 	{
@@ -158,12 +171,180 @@ static void mcpIdleCallback(void* userdata)
 			floater->onMCPToken(ev);
 		}
 	}
+
+	// ── Discord messages ──────────────────────────────────────────────────────
+	std::vector<DiscordMessage> discord_msgs;
+	{
+		std::lock_guard<std::mutex> lk(sDiscordQueueMutex);
+		if (!sDiscordQueue.empty()) discord_msgs.swap(sDiscordQueue);
+	}
+	for (const DiscordMessage& dmsg : discord_msgs)
+	{
+		// Register the display name so Firestorm doesn't look up the UUID as an SL avatar
+		LLAvatarName av_name;
+		av_name.fromLLSD(LLSD()
+			.with("display_name",             dmsg.display_name)
+			.with("username",                 dmsg.display_name)
+			.with("legacy_first_name",        dmsg.display_name)
+			.with("legacy_last_name",         std::string(""))
+			.with("is_display_name_default",  false)
+			.with("display_name_expires",     std::string("2099-01-01T00:00:00Z"))
+			.with("display_name_next_update", std::string("2099-01-01T00:00:00Z")));
+		LLAvatarNameCache::instance().insert(dmsg.session_uuid, av_name);
+
+		// addSession computes its own session_id — capture it
+		LLUUID real_session_id = LLIMMgr::instance().addSession(
+			dmsg.display_name, IM_NOTHING_SPECIAL, dmsg.session_uuid);
+		if (real_session_id.isNull()) continue;
+
+		// Also register name for the computed session UUID
+		LLAvatarNameCache::instance().insert(real_session_id, av_name);
+
+		// Register real_session_id as a Discord session so sendMsg() routes correctly
+		{
+			std::lock_guard<std::mutex> lk(sDiscordMutex);
+			sDiscordSessions[real_session_id]      = dmsg.display_name;
+			sDiscordOriginalUUIDs[real_session_id] = dmsg.session_uuid;
+		}
+
+		// Display the message — use real_session_id as from_id so colorization works
+		LLIMModel::instance().addMessage(real_session_id, dmsg.display_name,
+		                                 real_session_id, dmsg.text);
+
+		// Update the floater if open
+		FSFloaterIM* floater = FSFloaterIM::findInstance(real_session_id);
+		if (floater)
+		{
+			floater->updateMessages();
+		}
+	}
 }
 
 static void queueMCPEvent(const LLUUID& session_id, const std::string& token, bool done)
 {
 	std::lock_guard<std::mutex> lock(sMCPMutex);
 	sMCPEvents.push_back(LLSD().with("session_id", session_id.asString()).with("token", token).with("done", done));
+}
+
+static void queueDiscordMessage(const LLUUID& uuid, const std::string& display_name, const std::string& text)
+{
+	std::lock_guard<std::mutex> lk(sDiscordQueueMutex);
+	sDiscordQueue.push_back({uuid, display_name, text});
+}
+
+// Persistent background thread — reconnects every 5s on failure
+static void discordListenerThreadFunc()
+{
+	while (true)
+	{
+		int sock = ::socket(AF_INET, SOCK_STREAM, 0);
+		if (sock < 0) { std::this_thread::sleep_for(std::chrono::seconds(5)); continue; }
+
+		struct sockaddr_in addr{};
+		addr.sin_family = AF_INET;
+		addr.sin_port   = htons(DISCORD_RELAY_PORT);
+		::inet_pton(AF_INET, DISCORD_RELAY_HOST, &addr.sin_addr);
+
+		if (::connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0)
+		{
+			::close(sock);
+			std::this_thread::sleep_for(std::chrono::seconds(5));
+			continue;
+		}
+
+		std::string request =
+			"GET /events HTTP/1.1\r\n"
+			"Host: 127.0.0.1:3002\r\n"
+			"Accept: text/event-stream\r\n"
+			"Cache-Control: no-cache\r\n"
+			"Connection: keep-alive\r\n"
+			"\r\n";
+		::send(sock, request.c_str(), request.size(), 0);
+
+		std::string line_buf;
+		bool in_headers = true;
+		char ch;
+
+		while (::recv(sock, &ch, 1, 0) == 1)
+		{
+			if (ch != '\n') { if (ch != '\r') line_buf += ch; continue; }
+			std::string line = line_buf;
+			line_buf.clear();
+
+			if (in_headers) { if (line.empty()) in_headers = false; continue; }
+			if (line.rfind("data: ", 0) != 0) continue;
+
+			std::string payload = line.substr(6);
+			if (payload.empty() || payload[0] == ':') continue; // keepalive
+
+			try
+			{
+				boost::json::value val = boost::json::parse(payload);
+				if (!val.is_object()) continue;
+				auto& obj = val.as_object();
+				if (!obj.contains("session_uuid") || !obj.contains("display_name") || !obj.contains("text")) continue;
+
+				std::string uuid_str     = obj["session_uuid"].as_string().c_str();
+				std::string display_name = obj["display_name"].as_string().c_str();
+				std::string text         = obj["text"].as_string().c_str();
+
+				LLUUID session_uuid;
+				session_uuid.set(uuid_str);
+
+				// Register in Discord sessions map
+				{
+					std::lock_guard<std::mutex> lk(sDiscordMutex);
+					sDiscordSessions[session_uuid] = display_name;
+				}
+
+				queueDiscordMessage(session_uuid, display_name, text);
+			}
+			catch (...) {}
+		}
+
+		::close(sock);
+		std::this_thread::sleep_for(std::chrono::seconds(3));
+	}
+}
+
+static void sendDiscordMessage(const LLUUID& session_uuid, const std::string& text)
+{
+	// Resolve to the original Discord UUID that the relay knows about
+	LLUUID relay_uuid = session_uuid;
+	{
+		std::lock_guard<std::mutex> lk(sDiscordMutex);
+		auto it = sDiscordOriginalUUIDs.find(session_uuid);
+		if (it != sDiscordOriginalUUIDs.end()) relay_uuid = it->second;
+	}
+
+	std::thread([relay_uuid, text]()
+	{
+		boost::json::object body;
+		body["session_uuid"] = relay_uuid.asString();
+		body["text"]         = text;
+		std::string json_body = boost::json::serialize(body);
+
+		int sock = ::socket(AF_INET, SOCK_STREAM, 0);
+		if (sock < 0) return;
+
+		struct sockaddr_in addr{};
+		addr.sin_family = AF_INET;
+		addr.sin_port   = htons(DISCORD_RELAY_PORT);
+		::inet_pton(AF_INET, DISCORD_RELAY_HOST, &addr.sin_addr);
+
+		if (::connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) { ::close(sock); return; }
+
+		std::string request =
+			"POST /send HTTP/1.1\r\n"
+			"Host: 127.0.0.1:3002\r\n"
+			"Content-Type: application/json\r\n"
+			"Connection: close\r\n"
+			"Content-Length: " + std::to_string(json_body.size()) + "\r\n"
+			"\r\n" + json_body;
+
+		::send(sock, request.c_str(), request.size(), 0);
+		::close(sock);
+	}).detach();
 }
 
 // Context passed into the streaming thread
@@ -269,12 +450,24 @@ static void mcpStreamThreadFunc(MCPStreamContext ctx)
 	queueMCPEvent(ctx.session_id, "", true);
 }
 
+void startDiscordBridge()
+{
+	static bool started = false;
+	if (!started)
+	{
+		gIdleCallbacks.addFunction(mcpIdleCallback, nullptr);
+		std::thread(discordListenerThreadFunc).detach();
+		started = true;
+	}
+}
+
 static void sendMCPStreamRequest(const LLUUID& session_id, const std::string& prompt)
 {
 	static bool registered = false;
 	if (!registered)
 	{
-		gIdleCallbacks.addFunction(mcpIdleCallback, nullptr);
+		// Discord bridge already started from postBuild; just ensure idle callback is registered
+		startDiscordBridge();
 		registered = true;
 	}
 
@@ -1058,6 +1251,18 @@ void FSFloaterIM::sendMsg(const std::string& msg)
 			processIMTyping(mSessionID, true);
 			sendMCPStreamRequest(mSessionID, utf8_text);
 		}
+		return;
+	}
+
+	if (isDiscordSession(mSessionID))
+	{
+		// Display locally under the user's own name
+		std::string from;
+		LLAgentUI::buildFullname(from);
+		LLIMModel::instance().addMessage(mSessionID, from, gAgent.getID(), utf8_text);
+		updateMessages();
+		// Forward to Discord relay (fire-and-forget)
+		sendDiscordMessage(mSessionID, utf8_text);
 		return;
 	}
 
@@ -2812,6 +3017,9 @@ void FSFloaterIM::initIMFloater()
     // This is called on viewer start up
     // init chat window type before user changed it in preferences
     isChatMultiTab();
+
+    // Start Discord ↔ Firestorm bridge immediately at login
+    startDiscordBridge();
 }
 
 //static
