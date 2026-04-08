@@ -154,6 +154,14 @@ struct DiscordMessage
 static std::mutex                  sDiscordQueueMutex;
 static std::vector<DiscordMessage> sDiscordQueue;
 
+struct DiscordTypingEvent
+{
+	LLUUID session_uuid;
+	bool   typing;
+};
+static std::mutex                       sDiscordTypingMutex;
+static std::vector<DiscordTypingEvent>  sDiscordTypingQueue;
+
 static void mcpIdleCallback(void* userdata)
 {
 	// ── MCP (AI agent) events ─────────────────────────────────────────────────
@@ -216,6 +224,36 @@ static void mcpIdleCallback(void* userdata)
 		if (floater)
 		{
 			floater->updateMessages();
+		}
+	}
+
+	// ── Discord typing indicators ─────────────────────────────────────────────
+	std::vector<DiscordTypingEvent> typing_evs;
+	{
+		std::lock_guard<std::mutex> lk(sDiscordTypingMutex);
+		if (!sDiscordTypingQueue.empty()) typing_evs.swap(sDiscordTypingQueue);
+	}
+	for (const DiscordTypingEvent& ev : typing_evs)
+	{
+		// Resolve original Discord UUID → real session id
+		LLUUID real_session_id;
+		{
+			std::lock_guard<std::mutex> lk(sDiscordMutex);
+			for (const auto& kv : sDiscordOriginalUUIDs)
+			{
+				if (kv.second == ev.session_uuid)
+				{
+					real_session_id = kv.first;
+					break;
+				}
+			}
+		}
+		if (real_session_id.isNull()) continue;
+
+		FSFloaterIM* floater = FSFloaterIM::findInstance(real_session_id);
+		if (floater)
+		{
+			floater->processIMTyping(real_session_id, ev.typing);
 		}
 	}
 }
@@ -291,6 +329,18 @@ static void discordListenerThreadFunc()
 					continue;
 				}
 
+				// Typing indicator from relay
+				if (obj.contains("typing") && obj.contains("session_uuid"))
+				{
+					bool typing_val = obj["typing"].as_bool();
+					std::string uuid_str = obj["session_uuid"].as_string().c_str();
+					LLUUID session_uuid;
+					session_uuid.set(uuid_str);
+					std::lock_guard<std::mutex> lk(sDiscordTypingMutex);
+					sDiscordTypingQueue.push_back({session_uuid, typing_val});
+					continue;
+				}
+
 				if (!obj.contains("session_uuid") || !obj.contains("display_name") || !obj.contains("text")) continue;
 
 				std::string uuid_str     = obj["session_uuid"].as_string().c_str();
@@ -345,6 +395,45 @@ static void sendDiscordMessage(const LLUUID& session_uuid, const std::string& te
 
 		std::string request =
 			"POST /send HTTP/1.1\r\n"
+			"Host: 127.0.0.1:3002\r\n"
+			"Content-Type: application/json\r\n"
+			"Connection: close\r\n"
+			"Content-Length: " + std::to_string(json_body.size()) + "\r\n"
+			"\r\n" + json_body;
+
+		::send(sock, request.c_str(), request.size(), 0);
+		::close(sock);
+	}).detach();
+}
+
+static void sendDiscordTyping(const LLUUID& session_uuid, bool typing)
+{
+	LLUUID relay_uuid = session_uuid;
+	{
+		std::lock_guard<std::mutex> lk(sDiscordMutex);
+		auto it = sDiscordOriginalUUIDs.find(session_uuid);
+		if (it != sDiscordOriginalUUIDs.end()) relay_uuid = it->second;
+	}
+
+	std::thread([relay_uuid, typing]()
+	{
+		boost::json::object body;
+		body["session_uuid"] = relay_uuid.asString();
+		body["typing"]       = typing;
+		std::string json_body = boost::json::serialize(body);
+
+		int sock = ::socket(AF_INET, SOCK_STREAM, 0);
+		if (sock < 0) return;
+
+		struct sockaddr_in addr{};
+		addr.sin_family = AF_INET;
+		addr.sin_port   = htons(DISCORD_RELAY_PORT);
+		::inet_pton(AF_INET, DISCORD_RELAY_HOST, &addr.sin_addr);
+
+		if (::connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) { ::close(sock); return; }
+
+		std::string request =
+			"POST /typing HTTP/1.1\r\n"
 			"Host: 127.0.0.1:3002\r\n"
 			"Content-Type: application/json\r\n"
 			"Connection: close\r\n"
@@ -2516,6 +2605,15 @@ void FSFloaterIM::setTyping(bool typing)
         mShouldSendTypingState = true;
         // In case typing is started, send state after some delay
         mTypingTimer.reset();
+
+        // Forward typing state to Discord relay if this is a Discord session
+        bool is_discord = false;
+        {
+            std::lock_guard<std::mutex> lk(sDiscordMutex);
+            is_discord = (sDiscordOriginalUUIDs.count(mSessionID) > 0);
+        }
+        if (is_discord)
+            sendDiscordTyping(mSessionID, typing);
     }
 
     // Don't want to send typing indicators to multiple people, potentially too
