@@ -687,7 +687,9 @@ void LLViewerFloaterReg::registerFloaters()
     LLFloaterReg::add("sound_explorer", "floater_NACL_explore_sounds.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<NACLFloaterExploreSounds>);
     LLFloaterReg::add("vram_usage", "floater_fs_vram_usage.xml", static_cast<LLFloaterBuildFunc>(&LLFloaterReg::build<FSFloaterVRAMUsage>));
     LLFloaterReg::add("local_mesh_floater", "floater_vj_local_mesh.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<LLFloaterLocalMesh>); // local mesh
-    LLFloaterReg::add("panel_ai_agent", "panel_ai_agent.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<FSFloaterAIAgent>);
+    LLFloaterReg::add("panel_ai_agent",    "panel_ai_agent.xml",            (LLFloaterBuildFunc)&LLFloaterReg::build<FSFloaterAIAgent>);
+    LLFloaterReg::add("fs_ai_config",      "floater_fs_ai_config.xml",      (LLFloaterBuildFunc)&LLFloaterReg::build<FSFloaterAIConfig>);
+    LLFloaterReg::add("fs_ai_model_list",  "floater_fs_ai_model_list.xml",  (LLFloaterBuildFunc)&LLFloaterReg::build<FSFloaterAIModelList>);
     LLFloaterReg::add("fs_whitelist_floater", "floater_whitelist.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<FSFloaterWhiteListHelper>); // white list advisor
     // <FS:Chanayane> Compass floater
     LLFloaterReg::add("avatar_align",      "floater_avatar_align.xml",      (LLFloaterBuildFunc)&LLFloaterReg::build<FSFloaterAvatarAlign>);

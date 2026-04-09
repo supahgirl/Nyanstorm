@@ -13428,4 +13428,22 @@ void initialize_menus()
     // ── Discord status menu ────────────────────────────────────────────────────
     commit.add("Discord.SetStatus",   boost::bind(&handle_discord_set_status,   _2));
     enable.add("Discord.CheckStatus", boost::bind(&handle_discord_check_status, _1, _2));
+
+    // ── AI session menu ────────────────────────────────────────────────────────
+    extern void sendMCPRequest(const LLUUID&, const std::string&);
+    commit.add("AI.SessionSave", [](LLUICtrl*, const LLSD&) {
+        LLUUID sid = FSFloaterAIConfig::sCurrentEditingSession;
+        if (sid.isNull()) sid = AI_AGENT_SESSION_ID;
+        sendMCPRequest(sid, "/session export");
+    });
+    commit.add("AI.SessionLoad", [](LLUICtrl*, const LLSD&) {
+        LLUUID sid = FSFloaterAIConfig::sCurrentEditingSession;
+        if (sid.isNull()) sid = AI_AGENT_SESSION_ID;
+        FSFloaterAIConfig::openSessionLoadPicker(sid);
+    });
+    commit.add("AI.History", [](LLUICtrl*, const LLSD&) {
+        LLUUID sid = FSFloaterAIConfig::sCurrentEditingSession;
+        if (sid.isNull()) sid = AI_AGENT_SESSION_ID;
+        sendMCPRequest(sid, "/history json");
+    });
 }

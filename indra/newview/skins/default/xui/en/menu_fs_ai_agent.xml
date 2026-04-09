@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<toggleable_menu name="AI Agent Menu" opaque="true" visible="false">
+
+  <!-- ── Config ────────────────────────────────────────────────────────── -->
+  <menu_item_call
+    label="Config"
+    name="ai_config_set">
+    <menu_item_call.on_click
+      function="Floater.Toggle"
+      parameter="fs_ai_config"/>
+  </menu_item_call>
+
+  <!-- ── Models ───────────────────────────────────────────────────────── -->
+  <menu_item_call
+    label="Models"
+    name="ai_model_list">
+    <menu_item_call.on_click
+      function="Floater.Toggle"
+      parameter="fs_ai_model_list"/>
+  </menu_item_call>
+
+  <!-- ── Conversations ─────────────────────────────────────────────────── -->
+  <context_menu
+    label="Conversations"
+    name="ai_conversations_submenu">
+    <menu_item_call
+      label="Save"
+      name="ai_session_save">
+      <menu_item_call.on_click
+        function="AI.SessionSave"/>
+    </menu_item_call>
+    <menu_item_call
+      label="Restore"
+      name="ai_session_load">
+      <menu_item_call.on_click
+        function="AI.SessionLoad"/>
+    </menu_item_call>
+    <menu_item_separator/>
+    <menu_item_call
+      label="History"
+      name="ai_history">
+      <menu_item_call.on_click
+        function="AI.History"/>
+    </menu_item_call>
+  </context_menu>
+
+  <menu_item_separator/>
+
+  <menu_item_call
+    label="Clear history"
+    name="ai_reset">
+  </menu_item_call>
+  <menu_item_call
+    label="Clear context"
+    name="ai_reset_all">
+  </menu_item_call>
+
+
+</toggleable_menu>

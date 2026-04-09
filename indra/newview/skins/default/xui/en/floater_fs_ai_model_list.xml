@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<floater
+  positioning="cascading"
+  can_close="true"
+  can_resize="true"
+  layout="topleft"
+  name="fs_ai_model_list"
+  save_rect="true"
+  single_instance="true"
+  reuse_instance="true"
+  title="Available Models"
+  height="300"
+  width="480"
+  min_width="320"
+  min_height="180">
+
+  <scroll_list
+    name="model_list"
+    layout="topleft"
+    follows="all"
+    left="10" top="10" right="-10" bottom="-40"
+    draw_heading="true"
+    multi_select="false"
+    column_padding="4">
+    <column name="col_active" label="" width="20"/>
+    <column name="col_type"   label="Type"  width="70"/>
+    <column name="col_name"   label="Model" dynamicwidth="true"/>
+  </scroll_list>
+
+  <button
+    layout="topleft"
+    follows="bottom|left"
+    font="SansSerifSmall"
+    height="24" width="80"
+    left="10" bottom="-8"
+    label="OK"
+    name="ai_model_ok_btn"/>
+
+  <button
+    layout="topleft"
+    follows="bottom|left"
+    font="SansSerifSmall"
+    height="24" width="80"
+    left="100" bottom="-8"
+    label="Apply"
+    name="ai_model_apply_btn"/>
+
+  <button
+    layout="topleft"
+    follows="bottom|right"
+    font="SansSerifSmall"
+    height="24" width="80"
+    right="-10" bottom="-8"
+    label="Quit"
+    name="ai_model_quit_btn"/>
+
+</floater>

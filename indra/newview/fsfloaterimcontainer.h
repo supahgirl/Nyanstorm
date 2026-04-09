@@ -147,12 +147,104 @@ bool        isDiscordSession(const LLUUID& session_id);
 std::string getDiscordDisplayName(const LLUUID& session_id);
 void        discordUpdateStatusFromRelay(const std::string& status);
 
+// ── AI Config floater (forward declaration for FSFloaterAIAgent::draw) ────────
+class FSFloaterAIConfig;
+
 class FSFloaterAIAgent : public FSFloaterIM
 {
 public:
 	FSFloaterAIAgent(const LLUUID& session_id);
     bool postBuild() override;
+    void draw() override;
     static FSFloaterAIAgent* getInstance(const LLUUID& session_id = AI_AGENT_SESSION_ID);
+};
+
+// ── AI History notecard ───────────────────────────────────────────────────────
+// Called from onMCPServerSuccess when type=="history_export"
+void aiCreateHistoryNotecard(const LLUUID& session_id,
+                             const std::vector<std::pair<std::string,std::string>>& history);
+
+// ── AI Model List floater ─────────────────────────────────────────────────────
+
+class FSFloaterAIModelList : public LLFloater
+{
+public:
+    FSFloaterAIModelList(const LLSD& key);
+    bool postBuild() override;
+    void onOpen(const LLSD& key) override;
+
+    // Called from onMCPServerSuccess when type=="model_list"
+    static void updateModels(const std::vector<std::tuple<std::string, std::string, bool>>& models);
+
+private:
+    LLUUID mSessionID;
+    std::vector<std::tuple<std::string, std::string, bool>> mModels; // manager, name, active
+
+    void renderModelList();
+    void notifyAgents(const std::string& type, const std::string& name);
+    void onOKClicked();
+    void onApplyClicked();
+    void onQuitClicked();
+};
+
+// ── AI Config floater ──────────────────────────────────────────────────────────
+
+struct AIConfigState
+{
+    std::string name;
+    std::string persona;
+    std::string instructions;
+    bool        web_search = true;
+};
+
+class FSFloaterAIConfig : public LLFloater
+{
+public:
+    FSFloaterAIConfig(const LLSD& key);
+    bool postBuild() override;
+    void onOpen(const LLSD& key) override;
+
+    // Per-session config state — keyed by AI agent session UUID
+    static std::map<LLUUID, AIConfigState> sConfigs;
+    // Set by FSFloaterAIAgent::draw() so onOpen knows which session to edit
+    static LLUUID sCurrentEditingSession;
+
+    static void onServerReset(const LLUUID& session_id);
+    static void applySnapshot(const LLUUID& session_id,
+                              const std::string& name,
+                              const std::string& persona,
+                              const std::string& instructions,
+                              bool web_tools);
+    // Overload used when session_id is unknown — falls back to sCurrentEditingSession
+    static void applySnapshot(const std::string& name,
+                              const std::string& persona,
+                              const std::string& instructions,
+                              bool web_tools);
+    static void openLoadPickerForSession(const LLUUID& session_id);
+
+    // ── Session save/load ─────────────────────────────────────────────────
+    // Called when /session export response arrives; immediately opens save picker
+    static void onSessionExport(const LLUUID& session_id, const std::string& json);
+    // Called when /session load slash command is typed
+    static void openSessionLoadPicker(const LLUUID& session_id);
+
+private:
+    LLUUID mCurrentSessionID; // session this floater instance is currently editing
+
+    void onOKClicked();
+    void onQuitClicked();
+    void onSaveClicked();
+    void onLoadClicked();
+    void onAgentChanged();
+    void onSaveFileSelected(const std::vector<std::string>& filenames);
+    void onLoadFileSelected(const std::vector<std::string>& filenames);
+    static void onLoadForSessionFileSelected(const std::vector<std::string>& filenames);
+    static LLUUID sPendingLoadSessionID;
+
+    static void onSessionSaveFileSelected(const std::vector<std::string>& filenames);
+    static void onSessionLoadFileSelected(const std::vector<std::string>& filenames);
+    static LLUUID   sPendingSessionSessionID;
+    static std::string sPendingSessionJSON;
 };
 
 #endif // FS_FLOATERIMCONTAINER_H

@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<floater
+  positioning="cascading"
+  can_close="true"
+  can_resize="true"
+  layout="topleft"
+  name="fs_ai_config"
+  save_rect="true"
+  single_instance="true"
+  reuse_instance="true"
+  title="AI Config"
+  height="444"
+  width="420"
+  min_width="320"
+  min_height="300">
+
+  <!-- ── Fixed top: agent selector ───────────────────────────────────── -->
+  <text
+    layout="topleft"
+    follows="top|left"
+    font="SansSerifSmall"
+    height="16" width="55"
+    left="10" top="8"
+    name="label_agent">Agent</text>
+  <combo_box
+    layout="topleft"
+    follows="top|left|right"
+    font="SansSerifSmall"
+    height="20"
+    left="70" top="6" right="-10"
+    name="ai_agent_select"/>
+
+  <!-- ── Fixed top: config name ──────────────────────────────────────── -->
+  <text
+    layout="topleft"
+    follows="top|left"
+    font="SansSerifSmall"
+    height="16" width="80"
+    left="10" top="34"
+    name="label_config_name">Config name</text>
+  <line_editor
+    layout="topleft"
+    follows="top|left|right"
+    font="SansSerifSmall"
+    height="20"
+    left="95" top="32" right="-10"
+    name="ai_config_name"
+    max_length_bytes="256"/>
+  <text
+    layout="topleft"
+    follows="top|left|right"
+    font="SansSerifSmall"
+    height="16"
+    left="95" top="54" right="-10"
+    visible="false"
+    text_color="DrKissRed"
+    name="ai_config_name_error">A config name is required.</text>
+
+  <!-- ── Main vertical stack (fills rest of floater) ─────────────────── -->
+  <layout_stack
+    animate="false"
+    follows="all"
+    orientation="vertical"
+    name="editors_stack"
+    top="74" left="0"
+    width="420" height="370"
+    border_size="4"
+    show_drag_handle="true">
+
+    <!-- Persona: label + editor in one resizable panel -->
+    <layout_panel
+      name="persona_panel"
+      auto_resize="true"
+      user_resize="true"
+      min_height="60"
+      height="140">
+      <text
+        layout="topleft"
+        follows="top|left|right"
+        font="SansSerifSmall"
+        left="8" top="3" right="-8" height="16"
+        name="label_persona">Persona</text>
+      <text_editor
+        layout="topleft"
+        follows="all"
+        font="SansSerifSmall"
+        left="8" top="22" right="-8" bottom="-2"
+        name="ai_config_persona"
+        word_wrap="true"
+        spellcheck="false"
+        max_length="4096"/>
+    </layout_panel>
+
+    <!-- Instructions: label + editor in one resizable panel -->
+    <layout_panel
+      name="instructions_panel"
+      auto_resize="true"
+      user_resize="true"
+      min_height="60"
+      height="158">
+      <text
+        layout="topleft"
+        follows="top|left|right"
+        font="SansSerifSmall"
+        left="8" top="3" right="-8" height="16"
+        name="label_instructions">Instructions</text>
+      <text_editor
+        layout="topleft"
+        follows="all"
+        font="SansSerifSmall"
+        left="8" top="22" right="-8" bottom="-2"
+        name="ai_config_instructions"
+        word_wrap="true"
+        spellcheck="false"
+        max_length="8192"/>
+    </layout_panel>
+
+    <!-- Bottom controls: web search + buttons -->
+    <layout_panel
+      name="controls_panel"
+      auto_resize="false"
+      user_resize="false"
+      height="56">
+      <check_box
+        layout="topleft"
+        follows="top|left"
+        font="SansSerifSmall"
+        height="16"
+        left="10" top="4"
+        label="Web search"
+        name="ai_config_web_search"/>
+      <button
+        layout="topleft"
+        follows="top|left"
+        font="SansSerifSmall"
+        height="24" width="90"
+        left="10" top="28"
+        label="Load..."
+        name="ai_load_btn"/>
+      <button
+        layout="topleft"
+        follows="top|left"
+        font="SansSerifSmall"
+        height="24" width="90"
+        left="110" top="28"
+        label="Save..."
+        name="ai_save_btn"/>
+      <button
+        layout="topleft"
+        follows="top|right"
+        font="SansSerifSmall"
+        height="24" width="80"
+        right="-100" top="28"
+        label="Quit"
+        name="ai_quit_btn"/>
+      <button
+        layout="topleft"
+        follows="top|right"
+        font="SansSerifSmall"
+        height="24" width="80"
+        right="-10" top="28"
+        label="OK"
+        name="ai_ok_btn"/>
+    </layout_panel>
+
+  </layout_stack>
+
+</floater>
