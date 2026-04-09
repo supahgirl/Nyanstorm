@@ -43,17 +43,27 @@
 #include "llgroupactions.h"
 #include "llgrouplist.h"
 #include "llnotificationsutil.h"
+#include "llcheckboxctrl.h"
+#include "llscrolllistcell.h"
 #include "llscrolllistctrl.h"
+#include "llscrolllistitem.h"
 #include "llslurl.h"
 #include "llstartup.h"
 #include "lltabcontainer.h"
 #include "lltooldraganddrop.h"
+#include "llimview.h"
 #include "llviewermenu.h"
 #include "llvoiceclient.h"
 #include "lggcontactsets.h"
 // [RLVa:KB] - @pay
 #include "rlvactions.h"
 // [/RLVa:KB]
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <fstream>
+#include <thread>
+#include <boost/json.hpp>
+#include "lldir.h"
 
 //Maximum number of people you can select to do an operation on at once.
 constexpr U32 MAX_FRIEND_SELECT = 20;
@@ -61,6 +71,10 @@ constexpr F32 RIGHTS_CHANGE_TIMEOUT = 5.f;
 
 static const std::string FRIENDS_TAB_NAME   = "friends_panel";
 static const std::string GROUP_TAB_NAME     = "groups_panel";
+static const std::string DISCORD_TAB_NAME   = "discord_panel";
+
+static const int   kDiscordContactsPort = 3002;
+static const char* kDiscordContactsHost = "127.0.0.1";
 
 
 //
@@ -193,6 +207,27 @@ bool FSFloaterContacts::postBuild()
 
     LLAvatarNameCache::getInstance()->addUseDisplayNamesCallback(boost::bind(&FSFloaterContacts::onDisplayNameChanged, this));
 
+    // ── Discord tab ──────────────────────────────────────────────────────────
+    mDiscordTab = getChild<LLPanel>(DISCORD_TAB_NAME);
+    mDiscordList = mDiscordTab->getChild<LLScrollListCtrl>("discord_contacts_list");
+    mDiscordOpenBtn    = mDiscordTab->getChild<LLButton>("discord_open_btn");
+    mDiscordRefreshBtn = mDiscordTab->getChild<LLButton>("discord_refresh_btn");
+    mDiscordOpenBtn->setCommitCallback(
+        [this](LLUICtrl*, const LLSD&) { openDiscordChatForSelected(); });
+    mDiscordRefreshBtn->setCommitCallback(
+        [this](LLUICtrl*, const LLSD&) { fetchDiscordContacts(); });
+    mDiscordList->setDoubleClickCallback(
+        boost::bind(&FSFloaterContacts::openDiscordChatForSelected, this));
+    // Fetch on tab selection
+    mTabContainer->setCommitCallback([this](LLUICtrl*, const LLSD&)
+    {
+        LLPanel* cur = mTabContainer->getCurrentPanel();
+        if (cur && cur->getName() == DISCORD_TAB_NAME)
+            fetchDiscordContacts();
+    });
+
+    loadDiscordMuted();
+
     return true;
 }
 
@@ -211,12 +246,30 @@ void FSFloaterContacts::draw()
         mDirtyNames = false;
     }
 
+    // Pick up Discord contacts queued by background thread
+    if (mDiscordPendingReady)
+    {
+        std::vector<DiscordContact> contacts;
+        {
+            std::lock_guard<std::mutex> lk(mDiscordMutex);
+            contacts.swap(mDiscordPending);
+            mDiscordPendingReady = false;
+            mDiscordFetching     = false;
+        }
+        populateDiscordList(contacts);
+    }
+
     LLFloater::draw();
 }
 
 bool FSFloaterContacts::tick()
 {
     onDisplayNameChanged();
+
+    // Auto-refresh Discord contacts every 5 minutes when the tab is visible
+    if (!mDiscordFetching && getActiveTabName() == DISCORD_TAB_NAME)
+        fetchDiscordContacts();
+
     return false;
 }
 
@@ -1432,4 +1485,264 @@ F32 FSFloaterContacts::onGetFilterOpacityCallback(ETypeTransparency type, F32 al
     return alpha;
 }
 // </FS:TJ>
+
+// ── Discord Contacts tab ──────────────────────────────────────────────────────
+
+void FSFloaterContacts::fetchDiscordContacts()
+{
+    if (mDiscordFetching) return;
+    mDiscordFetching = true;
+    mDiscordList->clearRows();
+
+    std::thread([this]()
+    {
+        std::vector<DiscordContact> result;
+
+        int sock = ::socket(AF_INET, SOCK_STREAM, 0);
+        if (sock < 0) { goto done; }
+        {
+            struct sockaddr_in addr{};
+            addr.sin_family = AF_INET;
+            addr.sin_port   = htons(kDiscordContactsPort);
+            ::inet_pton(AF_INET, kDiscordContactsHost, &addr.sin_addr);
+
+            if (::connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0)
+            {
+                ::close(sock);
+                goto done;
+            }
+
+            const std::string req =
+                "GET /contacts HTTP/1.1\r\n"
+                "Host: 127.0.0.1:3002\r\n"
+                "Connection: close\r\n"
+                "\r\n";
+            ::send(sock, req.c_str(), req.size(), 0);
+
+            std::string response;
+            char buf[4096];
+            ssize_t n;
+            while ((n = ::recv(sock, buf, sizeof(buf), 0)) > 0)
+                response.append(buf, n);
+            ::close(sock);
+
+            std::size_t body_pos = response.find("\r\n\r\n");
+            if (body_pos == std::string::npos) goto done;
+            std::string body = response.substr(body_pos + 4);
+
+            if (!body.empty() && std::isxdigit((unsigned char)body[0]))
+            {
+                std::size_t lf = body.find('\n');
+                if (lf != std::string::npos) body = body.substr(lf + 1);
+            }
+
+            try
+            {
+                boost::json::value jv = boost::json::parse(body);
+                if (!jv.is_array()) goto done;
+                for (const auto& jc : jv.as_array())
+                {
+                    if (!jc.is_object()) continue;
+                    const auto& obj = jc.as_object();
+                    DiscordContact c;
+                    c.discord_id   = obj.contains("discord_id")   ? std::string(obj.at("discord_id").as_string())   : "";
+                    c.display_name = obj.contains("display_name")  ? std::string(obj.at("display_name").as_string()) : "";
+                    c.status       = obj.contains("status")        ? std::string(obj.at("status").as_string())       : "offline";
+                    c.server       = obj.contains("server")        ? std::string(obj.at("server").as_string())       : "";
+                    if (c.discord_id.empty()) continue;
+                    c.uuid = discordUUID(c.discord_id);
+                    result.push_back(c);
+                }
+            }
+            catch (...) {}
+        }
+
+    done:
+        std::lock_guard<std::mutex> lk(mDiscordMutex);
+        mDiscordPending      = std::move(result);
+        mDiscordPendingReady = true;
+    }).detach();
+}
+
+void FSFloaterContacts::populateDiscordList(const std::vector<DiscordContact>& contacts)
+{
+    mDiscordContacts = contacts;
+
+    // Preserve selection across re-renders
+    LLUUID selected_id;
+    LLScrollListItem* sel = mDiscordList->getFirstSelected();
+    if (sel) selected_id = sel->getUUID();
+
+    for (const auto& c : mDiscordContacts)
+    {
+        LLAvatarName av;
+        std::string full = c.display_name + " (discord)";
+        av.fromLLSD(LLSD()
+            .with("display_name",             full)
+            .with("username",                 full)
+            .with("legacy_first_name",        c.display_name)
+            .with("legacy_last_name",         std::string("(discord)"))
+            .with("is_display_name_default",  true)
+            .with("display_name_expires",     std::string("2099-01-01T00:00:00Z"))
+            .with("display_name_next_update", std::string("2099-01-01T00:00:00Z")));
+        LLAvatarNameCache::instance().insert(c.uuid, av);
+    }
+
+    mDiscordList->clearRows();
+    // ● U+25CF — colored per status; empty for offline/invisible
+    static const std::string kDot = "\xe2\x97\x8f";
+    for (const auto& c : mDiscordContacts)
+    {
+        std::string  glyph;
+        LLColor4     dot_color;
+        bool         has_color = true;
+        if (c.status == "online")
+        {
+            glyph     = kDot;
+            dot_color = LLColor4(0.13f, 0.80f, 0.13f, 1.f);
+        }
+        else if (c.status == "idle")
+        {
+            glyph     = kDot;
+            dot_color = LLColor4(1.00f, 0.75f, 0.00f, 1.f);
+        }
+        else if (c.status == "dnd")
+        {
+            glyph     = kDot;
+            dot_color = LLColor4(0.85f, 0.10f, 0.10f, 1.f);
+        }
+        else if (c.status == "channel")
+        {
+            has_color = false; // receive dot already shows active state; no status dot needed
+        }
+        else
+        {
+            has_color = false; // offline/invisible — no dot
+        }
+
+        LLSD row;
+        row["id"] = c.uuid;
+        bool isMuted = (mDiscordMuted.count(c.uuid) > 0);
+        row["columns"][0]["column"] = "col_status";
+        row["columns"][0]["value"]  = glyph;
+        row["columns"][1]["column"] = "col_receive";
+        row["columns"][1]["type"]   = "checkbox";
+        row["columns"][1]["value"]  = !isMuted; // checked = receiving
+        row["columns"][2]["column"] = "col_name";
+        row["columns"][2]["value"]  = c.display_name;
+        row["columns"][3]["column"] = "col_server";
+        row["columns"][3]["value"]  = c.server;
+        LLScrollListItem* item = mDiscordList->addElement(row);
+        if (item)
+        {
+            if (has_color)
+            {
+                LLScrollListCell* cell = item->getColumn(0);
+                if (cell) cell->setColor(dot_color);
+            }
+            // Wire checkbox commit callback for this row
+            LLScrollListCheck* chk = dynamic_cast<LLScrollListCheck*>(item->getColumn(1));
+            if (chk)
+            {
+                LLUUID contact_uuid  = c.uuid;
+                std::string disc_id  = c.discord_id;
+                std::string status   = c.status;
+                chk->getCheckBox()->setCommitCallback(
+                    [this, contact_uuid, disc_id, status](LLUICtrl* ctrl, const LLSD&)
+                    {
+                        bool checked = ctrl->getValue().asBoolean(); // true = receiving
+                        if (checked)
+                            mDiscordMuted.erase(contact_uuid);
+                        else
+                            mDiscordMuted.insert(contact_uuid);
+                        saveDiscordMuted();
+                        postToRelay("/mute", "{\"discord_id\":\"" + disc_id +
+                                             "\",\"muted\":" + (checked ? "false" : "true") + "}");
+                        if (status == "channel")
+                            postToRelay("/channel_active",
+                                "{\"channel_id\":\"" + disc_id + "\",\"active\":"
+                                + (checked ? "true" : "false") + "}");
+                    });
+            }
+        }
+    }
+
+    // Restore selection
+    if (selected_id.notNull())
+        mDiscordList->selectByID(selected_id);
+
+    // Sync relay's active-channel state with the green/blue dot selection.
+    // Green (not muted) channels are enabled for auto-popup; blue (muted) are disabled.
+    for (const auto& c : mDiscordContacts)
+    {
+        if (c.status != "channel") continue;
+        bool muted = (mDiscordMuted.count(c.uuid) > 0);
+        std::string body = "{\"channel_id\":\"" + c.discord_id + "\",\"active\":"
+                           + (muted ? "false" : "true") + "}";
+        postToRelay("/channel_active", body);
+    }
+}
+
+static std::string discordMutedPath()
+{
+    return gDirUtilp->getExpandedFilename(LL_PATH_USER_SETTINGS, "discord_muted.json");
+}
+
+void FSFloaterContacts::loadDiscordMuted()
+{
+    mDiscordMuted.clear();
+    std::ifstream f(discordMutedPath());
+    if (!f.is_open()) return;
+    try
+    {
+        std::string s((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        boost::json::value jv = boost::json::parse(s);
+        if (!jv.is_array()) return;
+        for (const auto& v : jv.as_array())
+            mDiscordMuted.insert(LLUUID(std::string(v.as_string())));
+    }
+    catch (...) {}
+}
+
+void FSFloaterContacts::saveDiscordMuted()
+{
+    boost::json::array arr;
+    for (const auto& uuid : mDiscordMuted)
+        arr.push_back(boost::json::value(uuid.asString()));
+    std::ofstream f(discordMutedPath());
+    if (f.is_open()) f << boost::json::serialize(arr);
+}
+
+void FSFloaterContacts::openDiscordChatForSelected()
+{
+    LLScrollListItem* item = mDiscordList->getFirstSelected();
+    if (!item) return;
+
+    LLUUID uuid = item->getUUID();
+    const DiscordContact* found = nullptr;
+    for (const auto& c : mDiscordContacts)
+        if (c.uuid == uuid) { found = &c; break; }
+    if (!found) return;
+
+    std::string full_name = found->display_name + " (discord)";
+    LLUUID session_id = LLIMMgr::instance().addSession(
+        full_name, IM_NOTHING_SPECIAL, found->uuid);
+    if (session_id.isNull()) return;
+
+    {
+        std::lock_guard<std::mutex> lk(sDiscordMutex);
+        sDiscordSessions[session_id]      = full_name;
+        sDiscordOriginalUUIDs[session_id] = found->uuid;
+        if (found->status == "channel" || found->status == "channel_muted")
+        {
+            sDiscordChannelIds[session_id] = found->discord_id;
+            postToRelay("/channel_active",
+                "{\"channel_id\":" + found->discord_id + ",\"active\":true}");
+        }
+    }
+
+    LLAvatarName av;
+    if (LLAvatarNameCache::get(found->uuid, &av))
+        LLAvatarNameCache::instance().insert(session_id, av);
+}
 // EOF

@@ -67,6 +67,9 @@
 #include <boost/json.hpp>
 #include <fstream>
 #include <sstream>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <thread>
 
 // Defined in fsfloaterim.cpp — sends a slash command to the MCP server
 extern void sendMCPRequest(const LLUUID& session_id, const std::string& text);
@@ -77,7 +80,31 @@ const LLUUID AI_AGENT_2_SESSION_ID("6a0f6a0f-6a0f-6a0f-6a0f-6a0f6a0f6a1f");
 // ── Discord session registry ──────────────────────────────────────────────────
 std::map<LLUUID, std::string> sDiscordSessions;
 std::map<LLUUID, LLUUID>      sDiscordOriginalUUIDs;
+std::map<LLUUID, std::string> sDiscordChannelIds;
 std::mutex                    sDiscordMutex;
+
+// Fire-and-forget POST to the Discord relay
+void postToRelay(const std::string& path, const std::string& body)
+{
+    std::thread([path, body]()
+    {
+        int sock = ::socket(AF_INET, SOCK_STREAM, 0);
+        if (sock < 0) return;
+        struct sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_port   = htons(3002);
+        ::inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+        if (::connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) { ::close(sock); return; }
+        std::string req = "POST " + path + " HTTP/1.1\r\n"
+                          "Host: 127.0.0.1:3002\r\n"
+                          "Content-Type: application/json\r\n"
+                          "Content-Length: " + std::to_string(body.size()) + "\r\n"
+                          "Connection: close\r\n\r\n" + body;
+        ::send(sock, req.c_str(), req.size(), 0);
+        char buf[256]; while (::recv(sock, buf, sizeof(buf), 0) > 0) {}
+        ::close(sock);
+    }).detach();
+}
 
 LLUUID discordUUID(const std::string& discord_id)
 {
@@ -651,6 +678,18 @@ void FSFloaterIMContainer::sessionRemoved(const LLUUID& session_id)
         iMfloater->closeFloater();
     }
 
+    // If this was a temporarily-enabled Discord channel, disable it on the relay
+    {
+        std::lock_guard<std::mutex> lk(sDiscordMutex);
+        auto it = sDiscordChannelIds.find(session_id);
+        if (it != sDiscordChannelIds.end())
+        {
+            std::string cid = it->second;
+            sDiscordChannelIds.erase(it);
+            postToRelay("/channel_active", "{\"channel_id\":" + cid + ",\"active\":false}");
+        }
+    }
+
     uuid_vec_t::iterator found = std::find(mFlashingSessions.begin(), mFlashingSessions.end(), session_id);
     if (found != mFlashingSessions.end())
     {
@@ -1145,6 +1184,255 @@ void FSFloaterAIModelList::onOKClicked()
 void FSFloaterAIModelList::onQuitClicked()
 {
     closeFloater();
+}
+
+// ── FSFloaterDiscordContacts ──────────────────────────────────────────────────
+
+static const int    DISCORD_CONTACTS_PORT = 3002;
+static const char*  DISCORD_CONTACTS_HOST = "127.0.0.1";
+
+FSFloaterDiscordContacts::FSFloaterDiscordContacts(const LLSD& key)
+    : LLFloater(key)
+{
+}
+
+bool FSFloaterDiscordContacts::postBuild()
+{
+    getChild<LLButton>("dc_open_btn")->setCommitCallback(
+        [this](LLUICtrl*, const LLSD&) { openChatForSelected(); });
+    getChild<LLButton>("dc_refresh_btn")->setCommitCallback(
+        [this](LLUICtrl*, const LLSD&) { fetchContacts(); });
+    getChild<LLButton>("dc_close_btn")->setCommitCallback(
+        [this](LLUICtrl*, const LLSD&) { closeFloater(); });
+
+    // Double-click on a row opens chat
+    getChild<LLScrollListCtrl>("contacts_list")->setDoubleClickCallback(
+        [this]() { openChatForSelected(); });
+
+    return LLFloater::postBuild();
+}
+
+void FSFloaterDiscordContacts::onOpen(const LLSD& key)
+{
+    LLFloater::onOpen(key);
+    fetchContacts();
+}
+
+void FSFloaterDiscordContacts::draw()
+{
+    // Pick up result queued by the background fetch thread
+    if (mPendingReady)
+    {
+        std::vector<DiscordContact> contacts;
+        {
+            std::lock_guard<std::mutex> lk(mPendingMutex);
+            contacts.swap(mPending);
+            mPendingReady = false;
+            mFetching     = false;
+        }
+        populateList(contacts);
+    }
+    LLFloater::draw();
+}
+
+void FSFloaterDiscordContacts::fetchContacts()
+{
+    if (mFetching) return;
+    mFetching = true;
+
+    getChild<LLScrollListCtrl>("contacts_list")->clearRows();
+
+    std::thread([this]()
+    {
+        std::vector<DiscordContact> result;
+
+        int sock = ::socket(AF_INET, SOCK_STREAM, 0);
+        if (sock < 0) { goto done; }
+
+        {
+            struct sockaddr_in addr;
+            addr.sin_family = AF_INET;
+            addr.sin_port   = htons(DISCORD_CONTACTS_PORT);
+            ::inet_pton(AF_INET, DISCORD_CONTACTS_HOST, &addr.sin_addr);
+
+            if (::connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0)
+            {
+                ::close(sock);
+                goto done;
+            }
+
+            const std::string req =
+                "GET /contacts HTTP/1.1\r\n"
+                "Host: 127.0.0.1:3002\r\n"
+                "Connection: close\r\n"
+                "\r\n";
+            ::send(sock, req.c_str(), req.size(), 0);
+
+            // Read full response
+            std::string response;
+            char buf[4096];
+            ssize_t n;
+            while ((n = ::recv(sock, buf, sizeof(buf), 0)) > 0)
+                response.append(buf, n);
+            ::close(sock);
+
+            // Find body after double CRLF
+            std::size_t body_pos = response.find("\r\n\r\n");
+            if (body_pos == std::string::npos) goto done;
+            std::string body = response.substr(body_pos + 4);
+
+            // Skip chunked size line if present
+            if (!body.empty() && std::isxdigit((unsigned char)body[0]))
+            {
+                std::size_t lf = body.find('\n');
+                if (lf != std::string::npos) body = body.substr(lf + 1);
+            }
+
+            try
+            {
+                boost::json::value jv = boost::json::parse(body);
+                if (!jv.is_array()) goto done;
+                for (const auto& jc : jv.as_array())
+                {
+                    if (!jc.is_object()) continue;
+                    const auto& obj = jc.as_object();
+                    DiscordContact c;
+                    c.discord_id   = obj.contains("discord_id")   ? std::string(obj.at("discord_id").as_string())   : "";
+                    c.display_name = obj.contains("display_name")  ? std::string(obj.at("display_name").as_string()) : "";
+                    c.status       = obj.contains("status")        ? std::string(obj.at("status").as_string())       : "offline";
+                    c.server       = obj.contains("server")        ? std::string(obj.at("server").as_string())       : "";
+                    if (c.discord_id.empty()) continue;
+                    c.uuid = discordUUID(c.discord_id);
+                    result.push_back(c);
+                }
+            }
+            catch (...) {}
+        }
+
+    done:
+        std::lock_guard<std::mutex> lk(mPendingMutex);
+        mPending      = std::move(result);
+        mPendingReady = true;
+
+    }).detach();
+}
+
+void FSFloaterDiscordContacts::populateList(const std::vector<DiscordContact>& contacts)
+{
+    mContacts = contacts;
+
+    // Register each contact in the avatar name cache so Firestorm treats them
+    // as valid "avatars" and doesn't try to resolve them against SL servers.
+    for (const auto& c : mContacts)
+    {
+        LLAvatarName av;
+        std::string full = c.display_name + " (discord)";
+        av.fromLLSD(LLSD()
+            .with("display_name",             full)
+            .with("username",                 full)
+            .with("legacy_first_name",        c.display_name)
+            .with("legacy_last_name",         std::string("(discord)"))
+            .with("is_display_name_default",  true)
+            .with("display_name_expires",     std::string("2099-01-01T00:00:00Z"))
+            .with("display_name_next_update", std::string("2099-01-01T00:00:00Z")));
+        LLAvatarNameCache::instance().insert(c.uuid, av);
+    }
+
+    LLScrollListCtrl* list = getChild<LLScrollListCtrl>("contacts_list");
+    list->clearRows();
+
+    static const std::string kDot = "\xe2\x97\x8f"; // ● U+25CF
+    for (const auto& c : mContacts)
+    {
+        std::string glyph;
+        LLColor4    dot_color;
+        bool        has_color = true;
+        if (c.status == "online")
+        {
+            glyph     = kDot;
+            dot_color = LLColor4(0.13f, 0.80f, 0.13f, 1.f);
+        }
+        else if (c.status == "idle")
+        {
+            glyph     = kDot;
+            dot_color = LLColor4(1.00f, 0.75f, 0.00f, 1.f);
+        }
+        else if (c.status == "dnd")
+        {
+            glyph     = kDot;
+            dot_color = LLColor4(0.85f, 0.10f, 0.10f, 1.f);
+        }
+        else if (c.status == "channel")
+        {
+            glyph     = kDot;
+            dot_color = LLColor4(0.40f, 0.60f, 1.00f, 1.f);
+        }
+        else if (c.status == "channel_muted")
+        {
+            glyph     = kDot;
+            dot_color = LLColor4(0.45f, 0.45f, 0.45f, 1.f);
+        }
+        else
+        {
+            has_color = false;
+        }
+
+        LLSD row;
+        row["id"] = c.uuid;
+        row["columns"][0]["column"] = "col_status";
+        row["columns"][0]["value"]  = glyph;
+        row["columns"][1]["column"] = "col_name";
+        row["columns"][1]["value"]  = c.display_name;
+        row["columns"][2]["column"] = "col_server";
+        row["columns"][2]["value"]  = c.server;
+        LLScrollListItem* item = list->addElement(row);
+        if (item && has_color)
+        {
+            LLScrollListCell* cell = item->getColumn(0);
+            if (cell) cell->setColor(dot_color);
+        }
+    }
+}
+
+void FSFloaterDiscordContacts::openChatForSelected()
+{
+    LLScrollListCtrl* list = getChild<LLScrollListCtrl>("contacts_list");
+    LLScrollListItem* item = list->getFirstSelected();
+    if (!item) return;
+
+    LLUUID uuid = item->getUUID();
+
+    // Find matching contact
+    const DiscordContact* found = nullptr;
+    for (const auto& c : mContacts)
+        if (c.uuid == uuid) { found = &c; break; }
+    if (!found) return;
+
+    std::string full_name = found->display_name + " (discord)";
+
+    // Open (or focus) the IM session
+    LLUUID session_id = LLIMMgr::instance().addSession(
+        full_name, IM_NOTHING_SPECIAL, found->uuid);
+    if (session_id.isNull()) return;
+
+    // Register as a Discord session so sendMsg() routes to the relay
+    {
+        std::lock_guard<std::mutex> lk(sDiscordMutex);
+        sDiscordSessions[session_id]      = full_name;
+        sDiscordOriginalUUIDs[session_id] = found->uuid;
+        // If this is a channel, enable it on the relay and track for cleanup on close
+        if (found->status == "channel" || found->status == "channel_muted")
+        {
+            sDiscordChannelIds[session_id] = found->discord_id;
+            postToRelay("/channel_active",
+                "{\"channel_id\":" + found->discord_id + ",\"active\":true}");
+        }
+    }
+
+    // Mirror the avatar name entry under the session UUID as well
+    LLAvatarName av;
+    if (LLAvatarNameCache::get(found->uuid, &av))
+        LLAvatarNameCache::instance().insert(session_id, av);
 }
 
 // ── FSFloaterAIConfig ─────────────────────────────────────────────────────────

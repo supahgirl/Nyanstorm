@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<floater
+  positioning="cascading"
+  can_close="true"
+  can_resize="true"
+  layout="topleft"
+  name="fs_discord_contacts"
+  save_rect="true"
+  single_instance="true"
+  reuse_instance="true"
+  title="Discord Contacts"
+  height="320"
+  width="320"
+  min_width="240"
+  min_height="200">
+
+  <scroll_list
+    name="contacts_list"
+    layout="topleft"
+    follows="all"
+    left="10" top="10" right="-10" bottom="-40"
+    draw_heading="true"
+    multi_select="false"
+    column_padding="4">
+    <column name="col_status"  label=""       width="20"/>
+    <column name="col_receive" label=""       width="20"/>
+    <column name="col_name"    label="Name"   dynamicwidth="true"/>
+    <column name="col_server"  label="Server" width="110"/>
+  </scroll_list>
+
+  <button
+    layout="topleft"
+    follows="bottom|left"
+    font="SansSerifSmall"
+    height="24" width="90"
+    left="10" bottom="-8"
+    label="Open Chat"
+    name="dc_open_btn"/>
+
+  <button
+    layout="topleft"
+    follows="bottom|left"
+    font="SansSerifSmall"
+    height="24" width="80"
+    left="110" bottom="-8"
+    label="Refresh"
+    name="dc_refresh_btn"/>
+
+  <button
+    layout="topleft"
+    follows="bottom|right"
+    font="SansSerifSmall"
+    height="24" width="70"
+    right="-10" bottom="-8"
+    label="Close"
+    name="dc_close_btn"/>
+
+</floater>
