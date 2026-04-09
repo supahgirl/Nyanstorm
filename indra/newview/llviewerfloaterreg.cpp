@@ -689,7 +689,8 @@ void LLViewerFloaterReg::registerFloaters()
     LLFloaterReg::add("local_mesh_floater", "floater_vj_local_mesh.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<LLFloaterLocalMesh>); // local mesh
     LLFloaterReg::add("panel_ai_agent",    "panel_ai_agent.xml",            (LLFloaterBuildFunc)&LLFloaterReg::build<FSFloaterAIAgent>);
     LLFloaterReg::add("fs_ai_config",      "floater_fs_ai_config.xml",      (LLFloaterBuildFunc)&LLFloaterReg::build<FSFloaterAIConfig>);
-    LLFloaterReg::add("fs_ai_model_list",  "floater_fs_ai_model_list.xml",  (LLFloaterBuildFunc)&LLFloaterReg::build<FSFloaterAIModelList>);
+    LLFloaterReg::add("fs_ai_model_list",       "floater_fs_ai_model_list.xml",       (LLFloaterBuildFunc)&LLFloaterReg::build<FSFloaterAIModelList>);
+    LLFloaterReg::add("fs_discord_contacts",    "floater_fs_discord_contacts.xml",    (LLFloaterBuildFunc)&LLFloaterReg::build<FSFloaterDiscordContacts>);
     LLFloaterReg::add("fs_whitelist_floater", "floater_whitelist.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<FSFloaterWhiteListHelper>); // white list advisor
     // <FS:Chanayane> Compass floater
     LLFloaterReg::add("avatar_align",      "floater_avatar_align.xml",      (LLFloaterBuildFunc)&LLFloaterReg::build<FSFloaterAvatarAlign>);

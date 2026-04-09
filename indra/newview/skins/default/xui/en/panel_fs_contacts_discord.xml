@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<panel
+ height="300"
+ layout="topleft"
+ mouse_opaque="true"
+ name="discord_panel"
+ width="355">
+
+  <scroll_list
+    name="discord_contacts_list"
+    layout="topleft"
+    follows="all"
+    left="4" top="4" right="-4" bottom="-36"
+    draw_heading="true"
+    multi_select="false"
+    column_padding="4">
+    <column name="col_status"  label=""       width="20"/>
+    <column name="col_receive" label=""       width="24"/>
+    <column name="col_name"    label="Name"   dynamicwidth="true"/>
+    <column name="col_server"  label="Server" width="110"/>
+  </scroll_list>
+
+  <button
+    layout="topleft"
+    follows="bottom|left"
+    font="SansSerifSmall"
+    height="24" width="90"
+    left="4" bottom="-6"
+    label="Open Chat"
+    name="discord_open_btn"/>
+
+  <button
+    layout="topleft"
+    follows="bottom|left"
+    font="SansSerifSmall"
+    height="24" width="80"
+    left="102" bottom="-6"
+    label="Refresh"
+    name="discord_refresh_btn"/>
+
+</panel>

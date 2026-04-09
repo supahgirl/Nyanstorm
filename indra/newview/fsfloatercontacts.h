@@ -34,6 +34,10 @@
 #include "llfloater.h"
 #include "lggcontactsets.h"
 #include "rlvhandler.h"
+#include "fsfloaterimcontainer.h"
+#include <mutex>
+#include <set>
+#include <vector>
 
 class FSScrollListCtrl;
 class LLButton;
@@ -177,6 +181,27 @@ private:
     LLButton*               mGroupsSearchBtn{ nullptr };
     LLButton*               mGroupsTitlesBtn{ nullptr };
     LLButton*               mGroupsInviteBtn{ nullptr };
+
+    // Discord tab
+    LLPanel*                mDiscordTab{ nullptr };
+    LLScrollListCtrl*       mDiscordList{ nullptr };
+    LLButton*               mDiscordOpenBtn{ nullptr };
+    LLButton*               mDiscordRefreshBtn{ nullptr };
+    std::vector<DiscordContact> mDiscordContacts;
+    std::vector<DiscordContact> mDiscordPending;
+    std::mutex              mDiscordMutex;
+    bool                    mDiscordPendingReady{ false };
+    bool                    mDiscordFetching{ false };
+
+    void                    fetchDiscordContacts();
+    void                    populateDiscordList(const std::vector<DiscordContact>& contacts);
+    void                    openDiscordChatForSelected();
+    void                    onDiscordListMouseDown(S32 x, S32 y);
+    void                    loadDiscordMuted();
+    void                    saveDiscordMuted();
+
+    std::set<LLUUID>        mDiscordMuted;      // UUIDs of muted contacts
+    S32                     mDiscordClickX{ -1 }; // last mouse-down x on the list
 
     LLTextBox*              mFriendsCountTb{ nullptr };
     LLTextBox*              mGroupssCountTb{ nullptr };

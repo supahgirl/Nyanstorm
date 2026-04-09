@@ -138,14 +138,47 @@ extern const LLUUID AI_AGENT_SESSION_ID;
 extern const LLUUID AI_AGENT_2_SESSION_ID;
 
 // ── Discord session registry ──────────────────────────────────────────────────
-extern std::map<LLUUID, std::string> sDiscordSessions;   // real_session_id → display_name
-extern std::map<LLUUID, LLUUID>      sDiscordOriginalUUIDs; // real_session_id → original discord UUID
+extern std::map<LLUUID, std::string> sDiscordSessions;      // real_session_id → display_name
+extern std::map<LLUUID, LLUUID>      sDiscordOriginalUUIDs;  // real_session_id → original discord UUID
+extern std::map<LLUUID, std::string> sDiscordChannelIds;     // session_id → discord channel_id (str)
 extern std::mutex                    sDiscordMutex;
 
 LLUUID      discordUUID(const std::string& discord_id);
+void        postToRelay(const std::string& path, const std::string& body);
 bool        isDiscordSession(const LLUUID& session_id);
 std::string getDiscordDisplayName(const LLUUID& session_id);
 void        discordUpdateStatusFromRelay(const std::string& status);
+
+// ── Discord Contacts floater ──────────────────────────────────────────────────
+
+struct DiscordContact
+{
+    std::string discord_id;
+    std::string display_name;   // raw name (without " (discord)" suffix)
+    std::string status;         // "online"|"idle"|"dnd"|"offline"|"channel"|"channel_muted"
+    std::string server;         // guild name for channels, empty for friends
+    LLUUID      uuid;           // discordUUID(discord_id)
+};
+
+class FSFloaterDiscordContacts : public LLFloater
+{
+public:
+    FSFloaterDiscordContacts(const LLSD& key);
+    bool postBuild() override;
+    void onOpen(const LLSD& key) override;
+    void draw() override;
+
+private:
+    void fetchContacts();
+    void populateList(const std::vector<DiscordContact>& contacts);
+    void openChatForSelected();
+
+    std::vector<DiscordContact> mContacts;
+    std::vector<DiscordContact> mPending;
+    std::mutex                  mPendingMutex;
+    bool                        mPendingReady = false;
+    bool                        mFetching     = false;
+};
 
 // ── AI Config floater (forward declaration for FSFloaterAIAgent::draw) ────────
 class FSFloaterAIConfig;

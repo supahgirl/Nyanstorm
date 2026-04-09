@@ -77,6 +77,14 @@
 	   left="0"
 	   right="-1"
 	   name="contact_sets_panel" />
+
+	  <panel
+	   bottom="0"
+	   filename="panel_fs_contacts_discord.xml"
+	   label="Discord"
+	   left="0"
+	   right="-1"
+	   name="discord_panel" />
     </tab_container>
       <icon
         follows="left|top|right"
