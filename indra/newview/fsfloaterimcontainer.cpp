@@ -1016,6 +1016,17 @@ bool FSFloaterAIModelList::postBuild()
         boost::bind(&FSFloaterAIModelList::onApplyClicked, this));
     getChild<LLButton>("ai_model_quit_btn")->setCommitCallback(
         boost::bind(&FSFloaterAIModelList::onQuitClicked, this));
+
+    // Context slider: update label live, persist to setting
+    getChild<LLUICtrl>("ai_context_slider")->setCommitCallback(
+        [this](LLUICtrl* ctrl, const LLSD&)
+        {
+            S32 k = (S32)ctrl->getValue().asReal();
+            gSavedSettings.setS32("FSAIContextSizeK", k);
+            std::string label = (k == 0) ? "auto" : std::to_string(k) + "k";
+            getChild<LLTextBox>("ai_context_value")->setText(label);
+        });
+
     return LLFloater::postBuild();
 }
 
@@ -1029,6 +1040,12 @@ void FSFloaterAIModelList::onOpen(const LLSD& key)
     mModels.clear();
     getChild<LLScrollListCtrl>("model_list")->clearRows();
     sendMCPRequest(mSessionID, "/model list json");
+
+    // Restore slider from persistent setting
+    S32 ctx_k = gSavedSettings.getS32("FSAIContextSizeK");
+    getChild<LLUICtrl>("ai_context_slider")->setValue(LLSD((F32)ctx_k));
+    std::string ctx_label = (ctx_k == 0) ? "auto" : std::to_string(ctx_k) + "k";
+    getChild<LLTextBox>("ai_context_value")->setText(ctx_label);
 }
 
 void FSFloaterAIModelList::renderModelList()
@@ -1094,6 +1111,10 @@ void FSFloaterAIModelList::onApplyClicked()
     renderModelList();
     notifyAgents(type, name);
 
+    // Push context size to orchestrator before loading model
+    S32 ctx_k = gSavedSettings.getS32("FSAIContextSizeK");
+    sendMCPRequest(mSessionID, "/config context " + std::to_string(ctx_k));
+
     std::string cmd = (type == "MLX")
         ? "/model load mlx " + name
         : "/model load ollama " + name;
@@ -1110,6 +1131,9 @@ void FSFloaterAIModelList::onOKClicked()
     std::string name = item->getColumn(2)->getValue().asString();
 
     notifyAgents(type, name);
+
+    S32 ctx_k = gSavedSettings.getS32("FSAIContextSizeK");
+    sendMCPRequest(mSessionID, "/config context " + std::to_string(ctx_k));
 
     std::string cmd = (type == "MLX")
         ? "/model load mlx " + name

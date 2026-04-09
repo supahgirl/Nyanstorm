@@ -9,16 +9,16 @@
   single_instance="true"
   reuse_instance="true"
   title="Available Models"
-  height="300"
+  height="330"
   width="480"
   min_width="320"
-  min_height="180">
+  min_height="210">
 
   <scroll_list
     name="model_list"
     layout="topleft"
     follows="all"
-    left="10" top="10" right="-10" bottom="-40"
+    left="10" top="10" right="-10" bottom="-70"
     draw_heading="true"
     multi_select="false"
     column_padding="4">
@@ -26,6 +26,34 @@
     <column name="col_type"   label="Type"  width="70"/>
     <column name="col_name"   label="Model" dynamicwidth="true"/>
   </scroll_list>
+
+  <!-- ── Context length slider ────────────────────────────────────────────── -->
+  <text
+    layout="topleft"
+    follows="bottom|left"
+    font="SansSerifSmall"
+    height="16" width="130"
+    left="10" bottom="-52"
+    name="label_context">Context (k tokens):</text>
+
+  <slider
+    layout="topleft"
+    follows="bottom|left|right"
+    font="SansSerifSmall"
+    label=""
+    show_text="false"
+    left="145" right="-65" bottom="-55" height="20"
+    name="ai_context_slider"
+    min_val="0" max_val="1000" increment="1" initial_value="32"
+    decimal_digits="0"/>
+
+  <text
+    layout="topleft"
+    follows="bottom|right"
+    font="SansSerifSmall"
+    height="16" width="55"
+    right="-10" bottom="-52"
+    name="ai_context_value">32k</text>
 
   <button
     layout="topleft"
