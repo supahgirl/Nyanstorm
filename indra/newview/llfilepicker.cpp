@@ -706,6 +706,7 @@ std::unique_ptr<std::vector<std::string>> LLFilePicker::navOpenFilterProc(ELoadF
             allowedv->push_back("gltf");
             allowedv->push_back("glb");
             allowedv->push_back("xml");
+            allowedv->push_back("json");
             // <FS:CR> Import filter
             allowedv->push_back("oxp");
             //allowedv->push_back("hpa");
