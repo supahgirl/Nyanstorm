@@ -513,6 +513,12 @@ static void sendDiscordTyping(const LLUUID& session_uuid, bool typing)
 		int sock = ::socket(AF_INET, SOCK_STREAM, 0);
 		if (sock < 0) return;
 
+		// Set a 1-second connect timeout to avoid thread accumulation
+		struct timeval tv;
+		tv.tv_sec  = 1;
+		tv.tv_usec = 0;
+		::setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+
 		struct sockaddr_in addr{};
 		addr.sin_family = AF_INET;
 		addr.sin_port   = htons(DISCORD_RELAY_PORT);
