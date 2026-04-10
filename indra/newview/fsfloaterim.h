@@ -172,6 +172,9 @@ public:
     // Update the window title, input field help text, etc. (public so container can force it)
     void updateSessionName(const std::string& ui_title, const std::string& ui_label);
 
+    // Override the "[NAME] is typing..." placeholder for typing indicators
+    void setTypingName(const std::string& name) { mTypingStart.setArg("[NAME]", name); }
+
 protected:
     void onClickCloseBtn(bool app_quitting = false) override;
     bool applyRectControl() override;

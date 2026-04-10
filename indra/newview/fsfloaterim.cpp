@@ -161,8 +161,9 @@ static std::vector<DiscordMessage> sDiscordQueue;
 
 struct DiscordTypingEvent
 {
-	LLUUID session_uuid;
-	bool   typing;
+	LLUUID      session_uuid;
+	bool        typing;
+	std::string author_name;  // non-empty for channel typing (who is typing)
 };
 static std::mutex                       sDiscordTypingMutex;
 static std::vector<DiscordTypingEvent>  sDiscordTypingQueue;
@@ -342,7 +343,29 @@ static void mcpIdleCallback(void* userdata)
 		FSFloaterIM* floater = FSFloaterIM::findInstance(real_session_id);
 		if (floater)
 		{
+			// For channel typing, override the typing indicator to show who's typing
+			// instead of the channel name ("#General / Server is typing...").
+			std::string title = floater->getTitle();
+			bool is_channel = (!title.empty() && title[0] == '#');
+
+			if (ev.typing && is_channel)
+			{
+				// Use author name from relay, or "Someone" as fallback
+				std::string typer = ev.author_name.empty() ? "Someone" : ev.author_name;
+				floater->setTypingName(typer);
+			}
+			else if (ev.typing && !ev.author_name.empty())
+			{
+				floater->setTypingName(ev.author_name);
+			}
+
 			floater->processIMTyping(real_session_id, ev.typing);
+
+			// Restore the channel/DM name when typing stops
+			if (!ev.typing && is_channel)
+			{
+				floater->setTypingName(title);
+			}
 		}
 	}
 }
@@ -424,10 +447,13 @@ static void discordListenerThreadFunc()
 				{
 					bool typing_val = obj["typing"].as_bool();
 					std::string uuid_str = obj["session_uuid"].as_string().c_str();
+					std::string author;
+					if (obj.contains("author_name"))
+						author = obj["author_name"].as_string().c_str();
 					LLUUID session_uuid;
 					session_uuid.set(uuid_str);
 					std::lock_guard<std::mutex> lk(sDiscordTypingMutex);
-					sDiscordTypingQueue.push_back({session_uuid, typing_val});
+					sDiscordTypingQueue.push_back({session_uuid, typing_val, author});
 					continue;
 				}
 
