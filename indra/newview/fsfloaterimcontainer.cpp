@@ -275,15 +275,6 @@ void FSFloaterIMContainer::initTabs()
             }
         }
     }
-
-	for (int i = 0; i < 2; ++i)
-	{
-		FSFloaterIM* floater_ai = FSFloaterIM::getInstance(agent_ids[i]);
-		if (floater_ai && !LLFloater::isVisible(floater_ai) && (floater_ai->getHost() != this))
-		{
-			addFloater(floater_ai, i == 0, IM_NOTHING_SPECIAL);
-		}
-	}
 }
 
 // [SL:KB] - Patch: UI-TabRearrange | Checked: 2012-05-05 (Catznip-3.3.0)
@@ -944,7 +935,9 @@ void FSFloaterIMContainer::saveOpenIMs()
                 LLIMModel::LLIMSession* session = LLIMModel::getInstance()->findIMSession(session_id);
                 if (session && session->mSessionType == LLIMModel::LLIMSession::P2P_SESSION
                     && !isDiscordSession(session_id)
-                    && session->mName.find("(discord)") == std::string::npos)
+                    && session->mName.find("(discord)") == std::string::npos
+                    && session_id != AI_AGENT_SESSION_ID
+                    && session_id != AI_AGENT_2_SESSION_ID)
                 {
                     LLSD session_data = LLSD::emptyMap();
                     session_data["other_participant_id"] = session->mOtherParticipantID;
@@ -976,9 +969,10 @@ void FSFloaterIMContainer::restoreOpenIMs()
             // Skip Discord sessions that were incorrectly saved — they will be
             // re-created when the SSE relay delivers the first message.
             bool is_discord = session_name.find("(discord)") != std::string::npos;
+            bool is_ai = (other_participant_id == AI_AGENT_SESSION_ID || other_participant_id == AI_AGENT_2_SESSION_ID);
             LL_INFOS("Discord") << "[DISCORD-TITLE-DBG] restoreOpenIMs: session_name='" << session_name
-                                << "' is_discord=" << is_discord << LL_ENDL;
-            if (other_participant_id.notNull() && !is_discord)
+                                << "' is_discord=" << is_discord << " is_ai=" << is_ai << LL_ENDL;
+            if (other_participant_id.notNull() && !is_discord && !is_ai)
             {
                 LLUUID new_session_id;
                 new_session_id = LLIMMgr::getInstance()->addSession(session_name, IM_NOTHING_SPECIAL, other_participant_id);
