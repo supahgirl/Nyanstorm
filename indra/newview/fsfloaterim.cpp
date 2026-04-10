@@ -2098,6 +2098,8 @@ bool FSFloaterIM::postBuild()
         {
             LL_INFOS("Discord") << "[DISCORD-TITLE-DBG] postBuild discord path: discord_name='" << discord_name << "'" << LL_ENDL;
             updateSessionName(discord_name, discord_name);
+            // Set the typing indicator name to the display title (after suffix stripping)
+            mTypingStart.setArg("[NAME]", getTitle());
             // Skip fetchAvatarName for Discord — the SL name server doesn't know
             // Discord UUIDs and its async callback can wrongly override the title.
         }
@@ -2271,6 +2273,9 @@ void FSFloaterIM::updateSessionName(const std::string& ui_title,
     mInputEditor->setLabel(LLTrans::getString("IM_to_label") + " " + label);
     setShortTitle(title);
     setTitle(title);
+
+    // Keep the typing indicator in sync with the display name
+    mTypingStart.setArg("[NAME]", title);
 }
 
 void FSFloaterIM::fetchAvatarName(LLUUID& agent_id)
