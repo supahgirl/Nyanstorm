@@ -1576,7 +1576,11 @@ void FSFloaterContacts::populateDiscordList(const std::vector<DiscordContact>& c
     for (const auto& c : mDiscordContacts)
     {
         LLAvatarName av;
-        std::string full = c.display_name + " (discord)";
+        bool is_chan = (c.status == "channel" || c.status == "channel_muted");
+        std::string srv_name = c.server.empty() ? "UNKNOWN_SERVER" : c.server;
+        std::string full = (is_chan)
+            ? c.display_name + " / " + srv_name + " (discord)"
+            : c.display_name + " (discord)";
         av.fromLLSD(LLSD()
             .with("display_name",             full)
             .with("username",                 full)
@@ -1724,25 +1728,62 @@ void FSFloaterContacts::openDiscordChatForSelected()
         if (c.uuid == uuid) { found = &c; break; }
     if (!found) return;
 
-    std::string full_name = found->display_name + " (discord)";
-    LLUUID session_id = LLIMMgr::instance().addSession(
-        full_name, IM_NOTHING_SPECIAL, found->uuid);
-    if (session_id.isNull()) return;
+    // Build the display name including server name for channels
+    bool is_chan = (found->status == "channel" || found->status == "channel_muted");
+    std::string srv_name = found->server.empty() ? "UNKNOWN_SERVER" : found->server;
+    std::string full_name = (is_chan)
+        ? found->display_name + " / " + srv_name + " (discord)"
+        : found->display_name + " (discord)";
 
+    // Pre-compute real_session_id and register BEFORE addSession so that
+    // isDiscordSession() is already true when postBuild fires.
+    LLUUID real_session_id = found->uuid ^ gAgent.getID();
     {
         std::lock_guard<std::mutex> lk(sDiscordMutex);
-        sDiscordSessions[session_id]      = full_name;
-        sDiscordOriginalUUIDs[session_id] = found->uuid;
-        if (found->status == "channel" || found->status == "channel_muted")
-        {
-            sDiscordChannelIds[session_id] = found->discord_id;
-            postToRelay("/channel_active",
-                "{\"channel_id\":" + found->discord_id + ",\"active\":true}");
-        }
+        sDiscordSessions[real_session_id]      = full_name;
+        sDiscordOriginalUUIDs[real_session_id] = found->uuid;
+        if (is_chan)
+            sDiscordChannelIds[real_session_id] = found->discord_id;
     }
 
     LLAvatarName av;
     if (LLAvatarNameCache::get(found->uuid, &av))
-        LLAvatarNameCache::instance().insert(session_id, av);
+        LLAvatarNameCache::instance().insert(real_session_id, av);
+
+    LLUUID session_id = LLIMMgr::instance().addSession(
+        full_name, IM_NOTHING_SPECIAL, found->uuid);
+    if (session_id.isNull())
+    {
+        std::lock_guard<std::mutex> lk(sDiscordMutex);
+        sDiscordSessions.erase(real_session_id);
+        sDiscordOriginalUUIDs.erase(real_session_id);
+        sDiscordChannelIds.erase(real_session_id);
+        return;
+    }
+    // Correct if viewer computed a different id than predicted
+    if (session_id != real_session_id)
+    {
+        std::lock_guard<std::mutex> lk(sDiscordMutex);
+        sDiscordSessions.erase(real_session_id);
+        sDiscordOriginalUUIDs.erase(real_session_id);
+        sDiscordChannelIds.erase(real_session_id);
+        sDiscordSessions[session_id]      = full_name;
+        sDiscordOriginalUUIDs[session_id] = found->uuid;
+        if (is_chan) sDiscordChannelIds[session_id] = found->discord_id;
+        if (LLAvatarNameCache::get(found->uuid, &av))
+            LLAvatarNameCache::instance().insert(session_id, av);
+    }
+
+    // Force title immediately
+    FSFloaterIM* floater = FSFloaterIM::findInstance(session_id);
+    if (floater)
+        floater->updateSessionName(full_name, full_name);
+
+    // Enable the channel on the relay
+    if (is_chan)
+    {
+        postToRelay("/channel_active",
+            "{\"channel_id\":" + found->discord_id + ",\"active\":true}");
+    }
 }
 // EOF

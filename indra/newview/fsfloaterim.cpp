@@ -152,6 +152,8 @@ struct DiscordMessage
 	LLUUID      session_uuid;
 	std::string display_name;
 	std::string text;
+	std::string author_name;        // non-empty for channel messages (e.g. "Spunk")
+	std::string author_discord_id;  // non-empty for channel messages (Discord user ID string)
 };
 
 static std::mutex                  sDiscordQueueMutex;
@@ -191,41 +193,125 @@ static void mcpIdleCallback(void* userdata)
 	}
 	for (const DiscordMessage& dmsg : discord_msgs)
 	{
-		// Register the display name so Firestorm doesn't look up the UUID as an SL avatar
+		bool is_channel = !dmsg.author_name.empty();
+		LLUUID real_session_id = dmsg.session_uuid ^ gAgent.getID();
+
+		std::string nice_name = dmsg.display_name;
+		LL_INFOS("Discord") << "[DISCORD-TITLE-DBG] processDiscordQueue: dmsg.display_name='" << dmsg.display_name << "'" << LL_ENDL;
+		// Only fall back to sDiscordSessions if the relay's display_name
+		// doesn't contain the server name (i.e. no " / " separator).
+		// The relay's SSE payload is the canonical source for channel names.
+		if (nice_name.find(" / ") == std::string::npos)
+		{
+			std::lock_guard<std::mutex> lk(sDiscordMutex);
+			auto it = sDiscordSessions.find(real_session_id);
+			if (it != sDiscordSessions.end() && !it->second.empty()
+			    && it->second.find(" / ") != std::string::npos)
+			{
+				nice_name = it->second;
+				LL_INFOS("Discord") << "[DISCORD-TITLE-DBG] overrode from sDiscordSessions: '" << nice_name << "'" << LL_ENDL;
+			}
+		}
+
+		// NOTE: Previously there was an LLAvatarNameCache::get override here that
+		// could overwrite nice_name with a cached value. Removed because the FS
+		// Contact Sets alias feature and SL name server re-requests can corrupt
+		// the cached display name for Discord UUIDs. The relay's display_name
+		// (via dmsg.display_name) is the canonical source of truth.
+
+		// Build the avatar name entry for the session (channel or DM contact)
 		LLAvatarName av_name;
 		av_name.fromLLSD(LLSD()
-			.with("display_name",             dmsg.display_name)
-			.with("username",                 dmsg.display_name)
-			.with("legacy_first_name",        dmsg.display_name)
+			.with("display_name",             nice_name)
+			.with("username",                 nice_name)
+			.with("legacy_first_name",        std::string(""))
 			.with("legacy_last_name",         std::string(""))
 			.with("is_display_name_default",  false)
 			.with("display_name_expires",     std::string("2099-01-01T00:00:00Z"))
 			.with("display_name_next_update", std::string("2099-01-01T00:00:00Z")));
 		LLAvatarNameCache::instance().insert(dmsg.session_uuid, av_name);
 
-		// addSession computes its own session_id — capture it
-		LLUUID real_session_id = LLIMMgr::instance().addSession(
-			dmsg.display_name, IM_NOTHING_SPECIAL, dmsg.session_uuid);
-		if (real_session_id.isNull()) continue;
-
-		// Also register name for the computed session UUID
+		// Pre-compute real_session_id (P2P: XOR of other_id and agent_id) and
+		// register as a Discord session BEFORE calling addSession.  The avatar
+		// name cache fires onAvatarNameCache synchronously inside addSession, so
+		// isDiscordSession(mSessionID) must already be true at that point for
+		// updateSessionName to strip the "(discord)" suffix from the title.
 		LLAvatarNameCache::instance().insert(real_session_id, av_name);
-
-		// Register real_session_id as a Discord session so sendMsg() routes correctly
 		{
 			std::lock_guard<std::mutex> lk(sDiscordMutex);
-			sDiscordSessions[real_session_id]      = dmsg.display_name;
+			sDiscordSessions[dmsg.session_uuid]    = nice_name;
+			sDiscordSessions[real_session_id]      = nice_name;
 			sDiscordOriginalUUIDs[real_session_id] = dmsg.session_uuid;
 		}
+		LL_INFOS("Discord") << "[DISCORD-TITLE-DBG] processDiscordQueue registered: session_uuid=" << dmsg.session_uuid
+		                    << " real_session_id=" << real_session_id << " nice_name='" << nice_name << "'" << LL_ENDL;
 
-		// Display the message — use real_session_id as from_id so colorization works
-		LLIMModel::instance().addMessage(real_session_id, dmsg.display_name,
-		                                 real_session_id, dmsg.text);
+		// Open / focus the session (postBuild will fire synchronously here)
+		LLUUID actual_id = LLIMMgr::instance().addSession(
+			nice_name, IM_NOTHING_SPECIAL, dmsg.session_uuid);
+		LL_INFOS("Discord") << "[DISCORD-TITLE-DBG] processDiscordQueue addSession returned: actual_id=" << actual_id << LL_ENDL;
+		if (actual_id.isNull())
+		{
+			std::lock_guard<std::mutex> lk(sDiscordMutex);
+			sDiscordSessions.erase(real_session_id);
+			sDiscordOriginalUUIDs.erase(real_session_id);
+			continue;
+		}
+		// Correct if the viewer computed a different id than we predicted
+		if (actual_id != real_session_id)
+		{
+			std::lock_guard<std::mutex> lk(sDiscordMutex);
+			sDiscordSessions.erase(real_session_id);
+			sDiscordOriginalUUIDs.erase(real_session_id);
+			sDiscordSessions[actual_id]      = nice_name;
+			sDiscordOriginalUUIDs[actual_id] = dmsg.session_uuid;
+			LLAvatarNameCache::instance().insert(actual_id, av_name);
+			real_session_id = actual_id;
+		}
+
+		if (is_channel)
+		{
+			// Channel message: show author name as sender; pre-register their DM session
+			// so clicking the name and pressing IM in the inspector routes to Discord.
+			LLUUID author_uuid = discordUUID(dmsg.author_discord_id);
+			std::string author_display = dmsg.author_name + " (discord)";
+
+			LLAvatarName author_av;
+			author_av.fromLLSD(LLSD()
+				.with("display_name",             author_display)
+				.with("username",                 dmsg.author_name)
+				.with("legacy_first_name",        dmsg.author_name)
+				.with("legacy_last_name",         std::string("(discord)"))
+				.with("is_display_name_default",  true)
+				.with("display_name_expires",     std::string("2099-01-01T00:00:00Z"))
+				.with("display_name_next_update", std::string("2099-01-01T00:00:00Z")));
+			LLAvatarNameCache::instance().insert(author_uuid, author_av);
+
+			// Pre-register the DM session (real_session_id = author_uuid XOR agent_id)
+			LLUUID dm_session_id = author_uuid ^ gAgent.getID();
+			{
+				std::lock_guard<std::mutex> lk(sDiscordMutex);
+				sDiscordSessions[author_uuid]        = author_display;
+				sDiscordSessions[dm_session_id]      = author_display;
+				sDiscordOriginalUUIDs[dm_session_id] = author_uuid;
+			}
+
+			LLIMModel::instance().addMessage(real_session_id, dmsg.author_name,
+			                                 author_uuid, dmsg.text);
+		}
+		else
+		{
+			LLIMModel::instance().addMessage(real_session_id, dmsg.display_name,
+			                                 real_session_id, dmsg.text);
+		}
 
 		// Update the floater if open
 		FSFloaterIM* floater = FSFloaterIM::findInstance(real_session_id);
 		if (floater)
 		{
+			// Force title to the correct display name (handles stale sessions
+			// where postBuild already fired with an outdated mName).
+			floater->updateSessionName(nice_name, nice_name);
 			floater->updateMessages();
 		}
 	}
@@ -267,10 +353,11 @@ static void queueMCPEvent(const LLUUID& session_id, const std::string& token, bo
 	sMCPEvents.push_back(LLSD().with("session_id", session_id.asString()).with("token", token).with("done", done));
 }
 
-static void queueDiscordMessage(const LLUUID& uuid, const std::string& display_name, const std::string& text)
+static void queueDiscordMessage(const LLUUID& uuid, const std::string& display_name, const std::string& text,
+                                const std::string& author_name = "", const std::string& author_discord_id = "")
 {
 	std::lock_guard<std::mutex> lk(sDiscordQueueMutex);
-	sDiscordQueue.push_back({uuid, display_name, text});
+	sDiscordQueue.push_back({uuid, display_name, text, author_name, author_discord_id});
 }
 
 // Persistent background thread — reconnects every 5s on failure
@@ -349,17 +436,15 @@ static void discordListenerThreadFunc()
 				std::string uuid_str     = obj["session_uuid"].as_string().c_str();
 				std::string display_name = obj["display_name"].as_string().c_str();
 				std::string text         = obj["text"].as_string().c_str();
+				std::string author_name;
+				std::string author_discord_id;
+				if (obj.contains("author_name"))       author_name       = obj["author_name"].as_string().c_str();
+				if (obj.contains("author_discord_id")) author_discord_id = obj["author_discord_id"].as_string().c_str();
 
 				LLUUID session_uuid;
 				session_uuid.set(uuid_str);
 
-				// Register in Discord sessions map
-				{
-					std::lock_guard<std::mutex> lk(sDiscordMutex);
-					sDiscordSessions[session_uuid] = display_name;
-				}
-
-				queueDiscordMessage(session_uuid, display_name, text);
+				queueDiscordMessage(session_uuid, display_name, text, author_name, author_discord_id);
 			}
 			catch (...) {}
 		}
@@ -992,6 +1077,19 @@ void FSFloaterIM::onFocusLost()
 
 void FSFloaterIM::onFocusReceived()
 {
+    // Re-apply Discord title whenever the tab is selected (tab switch, session restore, etc.)
+    {
+        std::string discord_name;
+        {
+            std::lock_guard<std::mutex> lk(sDiscordMutex);
+            auto it = sDiscordSessions.find(mSessionID);
+            if (it != sDiscordSessions.end())
+                discord_name = it->second;
+        }
+        if (!discord_name.empty())
+            updateSessionName(discord_name, discord_name);
+    }
+
     LLIMModel::getInstance()->setActiveSessionID(mSessionID);
 
     LLChicletBar::getInstance()->getChicletPanel()->setChicletToggleState(mSessionID, true);
@@ -1976,16 +2074,40 @@ bool FSFloaterIM::postBuild()
         mInputEditor->setLabel(LLTrans::getString("IM_unavailable_text_label"));
     }
 
-    if (im_session && im_session->isP2PSessionType())
+    // For Discord sessions use the stored display name directly —
+    // bypasses the SL avatar name cache which doesn't know Discord UUIDs.
     {
-        mTypingStart.setArg("[NAME]", im_session->mName);
-        updateSessionName(im_session->mName, im_session->mName);
-        fetchAvatarName(im_session->mOtherParticipantID);
-    }
-    else
-    {
-        std::string session_name(LLIMModel::instance().getName(mSessionID));
-        updateSessionName(session_name, session_name);
+        std::string discord_name;
+        {
+            std::lock_guard<std::mutex> lk(sDiscordMutex);
+            LL_INFOS("Discord") << "[DISCORD-TITLE-DBG] postBuild: mSessionID=" << mSessionID
+                                << " sDiscordSessions.size()=" << sDiscordSessions.size() << LL_ENDL;
+            auto it = sDiscordSessions.find(mSessionID);
+            if (it != sDiscordSessions.end())
+                discord_name = it->second;
+            else
+                LL_INFOS("Discord") << "[DISCORD-TITLE-DBG] postBuild: session NOT in sDiscordSessions" << LL_ENDL;
+        }
+        if (!discord_name.empty())
+        {
+            LL_INFOS("Discord") << "[DISCORD-TITLE-DBG] postBuild discord path: discord_name='" << discord_name << "'" << LL_ENDL;
+            updateSessionName(discord_name, discord_name);
+            // Skip fetchAvatarName for Discord — the SL name server doesn't know
+            // Discord UUIDs and its async callback can wrongly override the title.
+        }
+        else if (im_session && im_session->isP2PSessionType())
+        {
+            LL_INFOS("Discord") << "[DISCORD-TITLE-DBG] postBuild SL path: mName='" << im_session->mName << "'" << LL_ENDL;
+            mTypingStart.setArg("[NAME]", im_session->mName);
+            updateSessionName(im_session->mName, im_session->mName);
+            fetchAvatarName(im_session->mOtherParticipantID);
+        }
+        else
+        {
+            std::string session_name(LLIMModel::instance().getName(mSessionID));
+            LL_INFOS("Discord") << "[DISCORD-TITLE-DBG] postBuild group path: session_name='" << session_name << "'" << LL_ENDL;
+            updateSessionName(session_name, session_name);
+        }
     }
 
     //*TODO if session is not initialized yet, add some sort of a warning message like "starting session...blablabla"
@@ -2114,10 +2236,35 @@ void FSFloaterIM::updateSessionName(const std::string& ui_title,
                                     const std::string& ui_label)
 {
     // <FS:Ansariel> FIRE-7874: Name is missing on tab if announcing incoming IMs is enabled and sender's name is not in name cache
-    mSavedTitle = ui_title;
 
-    mInputEditor->setLabel(LLTrans::getString("IM_to_label") + " " + ui_label);
-    setTitle(ui_title);
+    // Strip the " (discord)" suffix from the title — done unconditionally so
+    // timing of sDiscordSessions registration does not matter.
+    // Channels: "#general / Server (discord)" → "#general / Server"
+    // DMs:      "Username (discord)"          → "Username / discord"
+    auto strip_discord = [](const std::string& s) -> std::string {
+        static const std::string kSuffix = " (discord)";
+        if (s.size() > kSuffix.size() &&
+            s.compare(s.size() - kSuffix.size(), kSuffix.size(), kSuffix) == 0)
+        {
+            std::string base = s.substr(0, s.size() - kSuffix.size());
+            // Channels already have " / ServerName" — just drop the suffix.
+            // DMs don't have " / " — append " / discord" so the user sees the source.
+            if (base.rfind("#", 0) == 0)
+                return base;
+            return base + " / discord";
+        }
+        return s;
+    };
+
+    std::string title = strip_discord(ui_title);
+    std::string label = strip_discord(ui_label);
+
+    LL_INFOS("Discord") << "[DISCORD-TITLE-DBG] updateSessionName: ui_title='" << ui_title << "' -> title='" << title << "'" << LL_ENDL;
+
+    mSavedTitle = title;
+    mInputEditor->setLabel(LLTrans::getString("IM_to_label") + " " + label);
+    setShortTitle(title);
+    setTitle(title);
 }
 
 void FSFloaterIM::fetchAvatarName(LLUUID& agent_id)
@@ -2137,6 +2284,12 @@ void FSFloaterIM::onAvatarNameCache(const LLUUID& agent_id,
                                     const LLAvatarName& av_name)
 {
     mAvatarNameCacheConnection.disconnect();
+
+    // Discord sessions manage their own titles — don't let the SL name cache override.
+    {
+        std::lock_guard<std::mutex> lk(sDiscordMutex);
+        if (sDiscordSessions.count(mSessionID)) return;
+    }
 
     std::string name = av_name.getCompleteName();
     if (LLAvatarName::useDisplayNames())

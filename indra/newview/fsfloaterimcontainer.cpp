@@ -30,6 +30,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "fsfloaterimcontainer.h"
+#include "lldraghandle.h"
 
 #include "fsfloatercontacts.h"
 #include "fsfloaterim.h"
@@ -174,6 +175,7 @@ bool FSFloaterIMContainer::postBuild()
 
     mTabContainer->setAllowRearrange(true);
     mTabContainer->setRearrangeCallback(boost::bind(&FSFloaterIMContainer::onIMTabRearrange, this, _1, _2));
+    mTabContainer->setCommitCallback(boost::bind(&FSFloaterIMContainer::onTabSelectedDiscord, this));
 
     mActiveVoiceUpdateTimer.setTimerExpirySec(VOICE_STATUS_UPDATE_INTERVAL);
     mActiveVoiceUpdateTimer.start();
@@ -856,6 +858,55 @@ void FSFloaterIMContainer::tabOpen(LLFloater* opened_floater, bool from_click)
     LLEmojiHelper::instance().hideHelper(nullptr, true);
 
     mFlashingTabStates.erase(opened_floater);
+
+    // For Discord sessions, refresh the floater title from sDiscordSessions now,
+    // before LLMultiFloater::onTabSelected() calls mDragHandle->setTitle().
+    FSFloaterIM* im_floater = dynamic_cast<FSFloaterIM*>(opened_floater);
+    if (im_floater)
+    {
+        LLUUID session_id = opened_floater->getKey().asUUID();
+        std::string discord_name;
+        {
+            std::lock_guard<std::mutex> lk(sDiscordMutex);
+            auto it = sDiscordSessions.find(session_id);
+            if (it != sDiscordSessions.end())
+                discord_name = it->second;
+        }
+        if (!discord_name.empty())
+            im_floater->updateSessionName(discord_name, discord_name);
+    }
+}
+
+void FSFloaterIMContainer::onTabSelectedDiscord()
+{
+    LLMultiFloater::onTabSelected();
+
+    // Force the correct title for Discord sessions — overrides whatever onTabSelected set.
+    LLFloater* floaterp = dynamic_cast<LLFloater*>(mTabContainer->getCurrentPanel());
+    if (!floaterp) return;
+    LLUUID sid = floaterp->getKey().asUUID();
+    if (!isDiscordSession(sid)) return;
+
+    std::string name = getDiscordDisplayName(sid);
+    // Strip " (discord)" suffix — channels keep "#ch / Server", DMs become "Name / discord"
+    static const std::string kSuffix = " (discord)";
+    if (name.size() > kSuffix.size() &&
+        name.compare(name.size() - kSuffix.size(), kSuffix.size(), kSuffix) == 0)
+    {
+        std::string base = name.substr(0, name.size() - kSuffix.size());
+        name = (base.rfind("#", 0) == 0) ? base : base + " / discord";
+    }
+
+    LL_INFOS("Discord") << "[DISCORD-TITLE-DBG] onTabSelectedDiscord: name='" << name
+                        << "' floater title='" << floaterp->getTitle()
+                        << "' floater shortTitle='" << floaterp->getShortTitle() << "'" << LL_ENDL;
+
+    // Force ALL title surfaces at once
+    floaterp->setTitle(name);
+    floaterp->setShortTitle(name);
+    S32 idx = mTabContainer->getIndexForPanel(floaterp);
+    if (idx != -1) mTabContainer->setPanelTitle(idx, name);
+    getDragHandle()->setTitle(getTitle() + " - " + name);
 }
 
 void FSFloaterIMContainer::startFlashingTab(LLFloater* floater, const std::string& message)
@@ -891,7 +942,9 @@ void FSFloaterIMContainer::saveOpenIMs()
             if (session_id.notNull())
             {
                 LLIMModel::LLIMSession* session = LLIMModel::getInstance()->findIMSession(session_id);
-                if (session && session->mSessionType == LLIMModel::LLIMSession::P2P_SESSION)
+                if (session && session->mSessionType == LLIMModel::LLIMSession::P2P_SESSION
+                    && !isDiscordSession(session_id)
+                    && session->mName.find("(discord)") == std::string::npos)
                 {
                     LLSD session_data = LLSD::emptyMap();
                     session_data["other_participant_id"] = session->mOtherParticipantID;
@@ -920,7 +973,12 @@ void FSFloaterIMContainer::restoreOpenIMs()
         {
             LLUUID other_participant_id = session_data["other_participant_id"].asUUID();
             std::string session_name = session_data["session_name"].asString();
-            if (other_participant_id.notNull())
+            // Skip Discord sessions that were incorrectly saved — they will be
+            // re-created when the SSE relay delivers the first message.
+            bool is_discord = session_name.find("(discord)") != std::string::npos;
+            LL_INFOS("Discord") << "[DISCORD-TITLE-DBG] restoreOpenIMs: session_name='" << session_name
+                                << "' is_discord=" << is_discord << LL_ENDL;
+            if (other_participant_id.notNull() && !is_discord)
             {
                 LLUUID new_session_id;
                 new_session_id = LLIMMgr::getInstance()->addSession(session_name, IM_NOTHING_SPECIAL, other_participant_id);
@@ -1326,12 +1384,17 @@ void FSFloaterDiscordContacts::populateList(const std::vector<DiscordContact>& c
     for (const auto& c : mContacts)
     {
         LLAvatarName av;
-        std::string full = c.display_name + " (discord)";
+        // For channels, include the server/guild name in the display name
+        bool is_chan = (c.status == "channel" || c.status == "channel_muted");
+        std::string srv_name = c.server.empty() ? "UNKNOWN_SERVER" : c.server;
+        std::string full = (is_chan)
+            ? c.display_name + " / " + srv_name + " (discord)"
+            : c.display_name + " (discord)";
         av.fromLLSD(LLSD()
             .with("display_name",             full)
             .with("username",                 full)
-            .with("legacy_first_name",        c.display_name)
-            .with("legacy_last_name",         std::string("(discord)"))
+            .with("legacy_first_name",        std::string(""))
+            .with("legacy_last_name",         std::string(""))
             .with("is_display_name_default",  true)
             .with("display_name_expires",     std::string("2099-01-01T00:00:00Z"))
             .with("display_name_next_update", std::string("2099-01-01T00:00:00Z")));
@@ -1408,31 +1471,72 @@ void FSFloaterDiscordContacts::openChatForSelected()
         if (c.uuid == uuid) { found = &c; break; }
     if (!found) return;
 
-    std::string full_name = found->display_name + " (discord)";
+    // Build the display name including server name for channels
+    bool is_chan = (found->status == "channel" || found->status == "channel_muted");
+    std::string srv_name = found->server.empty() ? "UNKNOWN_SERVER" : found->server;
+    std::string full_name = (is_chan)
+        ? found->display_name + " / " + srv_name + " (discord)"
+        : found->display_name + " (discord)";
+    LL_INFOS("Discord") << "[DISCORD-TITLE-DBG] openChatForSelected: display_name='" << found->display_name
+                        << "' server='" << found->server << "' full_name='" << full_name << "'" << LL_ENDL;
+
+    // Pre-compute real_session_id (P2P: XOR of other_id and agent_id) and
+    // register BEFORE addSession so isDiscordSession() is already true when
+    // onAvatarNameCache fires synchronously inside addSession.
+    LLUUID real_session_id = found->uuid ^ gAgent.getID();
+    {
+        std::lock_guard<std::mutex> lk(sDiscordMutex);
+        sDiscordSessions[real_session_id]      = full_name;
+        sDiscordOriginalUUIDs[real_session_id] = found->uuid;
+        if (is_chan)
+        {
+            sDiscordChannelIds[real_session_id] = found->discord_id;
+        }
+    }
+
+    // Mirror the updated avatar name under the pre-computed session UUID
+    LLAvatarName av;
+    if (LLAvatarNameCache::get(found->uuid, &av))
+        LLAvatarNameCache::instance().insert(real_session_id, av);
 
     // Open (or focus) the IM session
     LLUUID session_id = LLIMMgr::instance().addSession(
         full_name, IM_NOTHING_SPECIAL, found->uuid);
-    if (session_id.isNull()) return;
-
-    // Register as a Discord session so sendMsg() routes to the relay
+    if (session_id.isNull())
     {
         std::lock_guard<std::mutex> lk(sDiscordMutex);
+        sDiscordSessions.erase(real_session_id);
+        sDiscordOriginalUUIDs.erase(real_session_id);
+        sDiscordChannelIds.erase(real_session_id);
+        return;
+    }
+    // Correct if viewer computed a different id than predicted
+    if (session_id != real_session_id)
+    {
+        std::lock_guard<std::mutex> lk(sDiscordMutex);
+        sDiscordSessions.erase(real_session_id);
+        sDiscordOriginalUUIDs.erase(real_session_id);
+        sDiscordChannelIds.erase(real_session_id);
         sDiscordSessions[session_id]      = full_name;
         sDiscordOriginalUUIDs[session_id] = found->uuid;
-        // If this is a channel, enable it on the relay and track for cleanup on close
-        if (found->status == "channel" || found->status == "channel_muted")
-        {
-            sDiscordChannelIds[session_id] = found->discord_id;
-            postToRelay("/channel_active",
-                "{\"channel_id\":" + found->discord_id + ",\"active\":true}");
-        }
+        if (is_chan) sDiscordChannelIds[session_id] = found->discord_id;
+        if (LLAvatarNameCache::get(found->uuid, &av))
+            LLAvatarNameCache::instance().insert(session_id, av);
+        real_session_id = session_id;
     }
 
-    // Mirror the avatar name entry under the session UUID as well
-    LLAvatarName av;
-    if (LLAvatarNameCache::get(found->uuid, &av))
-        LLAvatarNameCache::instance().insert(session_id, av);
+    // Force title immediately — handles the case where postBuild already fired
+    // with a stale mName (e.g. session restored from a previous run).
+    FSFloaterIM* floater = FSFloaterIM::findInstance(real_session_id);
+    if (floater)
+        floater->updateSessionName(full_name, full_name);
+
+    // Enable the channel on the relay (channel sessions only)
+    if (is_chan)
+    {
+        postToRelay("/channel_active",
+            "{\"channel_id\":" + found->discord_id + ",\"active\":true}");
+    }
 }
 
 // ── FSFloaterAIConfig ─────────────────────────────────────────────────────────

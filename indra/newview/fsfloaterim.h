@@ -169,6 +169,9 @@ public:
 
     F32 onGetChatEditorOpacityCallback(ETypeTransparency type, F32 alpha);
 
+    // Update the window title, input field help text, etc. (public so container can force it)
+    void updateSessionName(const std::string& ui_title, const std::string& ui_label);
+
 protected:
     void onClickCloseBtn(bool app_quitting = false) override;
     bool applyRectControl() override;
@@ -180,13 +183,11 @@ protected:
 
     bool enableViewerVersionCallback(const LLSD& notification,const LLSD& response);        // <FS:Zi> Viewer version popup
     void reshapeChatLayoutPanel();
+
 private:
     // process focus events to set a currently active session
     void onFocusLost() override;
     void onFocusReceived() override;
-
-    // Update the window title, input field help text, etc.
-    void updateSessionName(const std::string& ui_title, const std::string& ui_label);
 
     // For display name lookups for IM window titles
     void onAvatarNameCache(const LLUUID& agent_id, const LLAvatarName& av_name);
