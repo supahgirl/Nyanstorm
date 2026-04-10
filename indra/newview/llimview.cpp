@@ -3968,6 +3968,15 @@ LLUUID LLIMMgr::addSession(
         return LLUUID::null;
     }
 
+    // Trace any Discord session creation — helps find who creates sessions
+    // with stale names like "#general (discord)" without the server name.
+    if (name.find("(discord)") != std::string::npos)
+    {
+        LL_INFOS("Discord") << "[DISCORD-TITLE-DBG] LLIMMgr::addSession CALLED: name='" << name
+                            << "' other_participant_id=" << other_participant_id
+                            << " dialog=" << dialog << LL_ENDL;
+    }
+
     LLUUID session_id = computeSessionID(dialog,other_participant_id);
 
     if (floater_id.notNull())
