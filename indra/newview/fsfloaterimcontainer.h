@@ -209,11 +209,11 @@ public:
     void onOpen(const LLSD& key) override;
 
     // Called from onMCPServerSuccess when type=="model_list"
-    static void updateModels(const std::vector<std::tuple<std::string, std::string, bool>>& models);
+    static void updateModels(const std::vector<std::tuple<std::string, std::string, std::string, bool>>& models);
 
 private:
     LLUUID mSessionID;
-    std::vector<std::tuple<std::string, std::string, bool>> mModels; // manager, name, active
+    std::vector<std::tuple<std::string, std::string, std::string, bool>> mModels; // manager, name, endpoint, active
 
     void renderModelList();
     void notifyAgents(const std::string& type, const std::string& name);

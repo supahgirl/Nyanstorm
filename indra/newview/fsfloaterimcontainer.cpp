@@ -1144,7 +1144,7 @@ void FSFloaterAIModelList::renderModelList()
     LLScrollListCtrl* list = getChild<LLScrollListCtrl>("model_list");
     list->clearRows();
 
-    for (auto& [manager, name, active] : mModels)
+    for (auto& [manager, name, endpoint, active] : mModels)
     {
         std::string style = active ? "BOLD" : "NORMAL";
         LLSD row;
@@ -1157,13 +1157,16 @@ void FSFloaterAIModelList::renderModelList()
         row["columns"][2]["column"]     = "col_name";
         row["columns"][2]["value"]      = name;
         row["columns"][2]["font-style"] = style;
+        row["columns"][3]["column"]     = "col_endpoint";
+        row["columns"][3]["value"]      = endpoint;
+        row["columns"][3]["font-style"] = style;
         list->addElement(row);
     }
 }
 
 /*static*/
 void FSFloaterAIModelList::updateModels(
-    const std::vector<std::tuple<std::string, std::string, bool>>& models)
+    const std::vector<std::tuple<std::string, std::string, std::string, bool>>& models)
 {
     FSFloaterAIModelList* inst =
         LLFloaterReg::findTypedInstance<FSFloaterAIModelList>("fs_ai_model_list");
@@ -1188,47 +1191,72 @@ void FSFloaterAIModelList::notifyAgents(const std::string& type, const std::stri
 
 void FSFloaterAIModelList::onApplyClicked()
 {
+    // Always push context size to both agents, regardless of model selection
+    S32 ctx_k = gSavedSettings.getS32("FSAIContextSizeK");
+    std::string ctx_cmd = "/config context " + std::to_string(ctx_k);
+    sendMCPRequest(AI_AGENT_SESSION_ID,   ctx_cmd);
+    sendMCPRequest(AI_AGENT_2_SESSION_ID, ctx_cmd);
+
     LLScrollListCtrl* list = getChild<LLScrollListCtrl>("model_list");
     LLScrollListItem* item = list->getFirstSelected();
     if (!item) return;
 
-    std::string type = item->getColumn(1)->getValue().asString();
-    std::string name = item->getColumn(2)->getValue().asString();
+    std::string type     = item->getColumn(1)->getValue().asString();
+    std::string name     = item->getColumn(2)->getValue().asString();
+    std::string endpoint = item->getColumn(3)->getValue().asString();
 
     // Optimistically mark the applied model as active in our local copy
-    for (auto& [manager, mname, active] : mModels)
+    for (auto& [manager, mname, ep, active] : mModels)
         active = (manager == type && mname == name);
 
     renderModelList();
     notifyAgents(type, name);
 
-    // Push context size to orchestrator before loading model
-    S32 ctx_k = gSavedSettings.getS32("FSAIContextSizeK");
-    sendMCPRequest(mSessionID, "/config context " + std::to_string(ctx_k));
-
-    std::string cmd = (type == "MLX")
-        ? "/model load mlx " + name
-        : "/model load ollama " + name;
+    std::string cmd;
+    if (type == "MLX")
+        cmd = "/model load mlx " + name;
+    else if (type == "LlamaCpp")
+    {
+        auto colon = endpoint.rfind(':');
+        std::string host = (colon != std::string::npos) ? endpoint.substr(0, colon) : "127.0.0.1";
+        std::string port = (colon != std::string::npos) ? endpoint.substr(colon + 1) : "8080";
+        cmd = "/model load llamacpp " + name + " --host " + host + " --port " + port;
+    }
+    else
+        cmd = "/model load ollama " + name;
     sendMCPRequest(mSessionID, cmd);
 }
 
 void FSFloaterAIModelList::onOKClicked()
 {
+    // Always push context size to both agents, regardless of model selection
+    S32 ctx_k = gSavedSettings.getS32("FSAIContextSizeK");
+    std::string ctx_cmd = "/config context " + std::to_string(ctx_k);
+    sendMCPRequest(AI_AGENT_SESSION_ID,   ctx_cmd);
+    sendMCPRequest(AI_AGENT_2_SESSION_ID, ctx_cmd);
+
     LLScrollListCtrl* list = getChild<LLScrollListCtrl>("model_list");
     LLScrollListItem* item = list->getFirstSelected();
     if (!item) { closeFloater(); return; }
 
-    std::string type = item->getColumn(1)->getValue().asString();
-    std::string name = item->getColumn(2)->getValue().asString();
+    std::string type     = item->getColumn(1)->getValue().asString();
+    std::string name     = item->getColumn(2)->getValue().asString();
+    std::string endpoint = item->getColumn(3)->getValue().asString();
 
     notifyAgents(type, name);
 
-    S32 ctx_k = gSavedSettings.getS32("FSAIContextSizeK");
-    sendMCPRequest(mSessionID, "/config context " + std::to_string(ctx_k));
-
-    std::string cmd = (type == "MLX")
-        ? "/model load mlx " + name
-        : "/model load ollama " + name;
+    std::string cmd;
+    if (type == "MLX")
+        cmd = "/model load mlx " + name;
+    else if (type == "LlamaCpp")
+    {
+        auto colon = endpoint.rfind(':');
+        std::string host = (colon != std::string::npos) ? endpoint.substr(0, colon) : "127.0.0.1";
+        std::string port = (colon != std::string::npos) ? endpoint.substr(colon + 1) : "8080";
+        cmd = "/model load llamacpp " + name + " --host " + host + " --port " + port;
+    }
+    else
+        cmd = "/model load ollama " + name;
     sendMCPRequest(mSessionID, cmd);
     closeFloater();
 }
