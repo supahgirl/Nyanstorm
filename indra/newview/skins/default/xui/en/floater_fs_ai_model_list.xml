@@ -10,8 +10,8 @@
   reuse_instance="true"
   title="Available Models"
   height="330"
-  width="480"
-  min_width="320"
+  width="600"
+  min_width="420"
   min_height="210">
 
   <scroll_list
@@ -22,9 +22,10 @@
     draw_heading="true"
     multi_select="false"
     column_padding="4">
-    <column name="col_active" label="" width="20"/>
-    <column name="col_type"   label="Type"  width="70"/>
-    <column name="col_name"   label="Model" dynamicwidth="true"/>
+    <column name="col_active"   label=""       width="20"/>
+    <column name="col_type"     label="Type"   width="70"/>
+    <column name="col_name"     label="Model"  dynamicwidth="true"/>
+    <column name="col_endpoint" label="Server" width="140"/>
   </scroll_list>
 
   <!-- ── Context length slider ────────────────────────────────────────────── -->

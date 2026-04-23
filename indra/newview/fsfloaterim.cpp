@@ -902,7 +902,7 @@ static void onMCPServerSuccess(const LLUUID& session_id, const LLSD& result)
 				}
 				if (obj.contains("type") && obj["type"].as_string() == "model_list")
 				{
-					std::vector<std::tuple<std::string, std::string, bool>> models;
+					std::vector<std::tuple<std::string, std::string, std::string, bool>> models;
 					if (obj.contains("models") && obj["models"].is_array())
 					{
 						for (auto& m : obj["models"].as_array())
@@ -912,7 +912,10 @@ static void onMCPServerSuccess(const LLUUID& session_id, const LLSD& result)
 							std::string manager = mo.contains("manager") && mo["manager"].is_string() ? std::string(mo["manager"].as_string()) : "";
 							std::string name    = mo.contains("name")    && mo["name"].is_string()    ? std::string(mo["name"].as_string())    : "";
 							bool        active  = mo.contains("active")  && mo["active"].is_bool()    ? mo["active"].as_bool()                 : false;
-							models.emplace_back(manager, name, active);
+							std::string host    = mo.contains("host")    && mo["host"].is_string()    ? std::string(mo["host"].as_string())    : "127.0.0.1";
+							int         port    = mo.contains("port")    && mo["port"].is_int64()     ? (int)mo["port"].as_int64()             : 0;
+							std::string endpoint = host + ":" + std::to_string(port);
+							models.emplace_back(manager, name, endpoint, active);
 						}
 					}
 					FSFloaterAIModelList::updateModels(models);
