@@ -79,6 +79,7 @@ class FloaterAO
         void onCheckOverrideSitsSmall();
         void onCheckSmart();
         void onCheckDisableStands();
+        void onCheckAlphaNumSort();
         void onClickMoveUp();
         void onClickMoveDown();
         void onClickTrash();
@@ -125,6 +126,9 @@ class FloaterAO
         LLCheckBoxCtrl* mOverrideSitsCheckBox;
         LLCheckBoxCtrl* mSmartCheckBox;
         LLCheckBoxCtrl* mDisableMouselookCheckBox;
+        LLCheckBoxCtrl* mAlphaNumSortCheckBox;
+        std::vector<AOSet::AOAnimation> mOriginalAnimations;
+        bool mInsideSortCallback;
 
         LLComboBox* mStateSelector;
         LLScrollListCtrl* mAnimationList;

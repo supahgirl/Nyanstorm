@@ -11,6 +11,7 @@
 		<check_box name="ao_smart" label="Ağıllı" tool_tip="Ağıllı rejim, oturmaq animasiyasının obyektin öz animasiyası ilə münaqişə edib-etməyəcəyini müəyyən etməyə çalışır və təyinatını müvəqqəti olaraq söndürür."
 				left_pad="4" right="-1" height="16" />
 		<check_box name="ao_disable_stands_in_mouselook" label="Mouselook-da duruşları söndür" tool_tip="Əgər öz duruş animasiyanızı saxlamaq istəyirsinizsə, bu nişanı qoyun." width="100" />
+		<check_box name="ao_alpha_num_sort" label="alpha/Num Sort" tool_tip="Animasiyaları siyahıda əlifba-rəqəm sırası ilə sıralayın. Yuxarı/aşağı düymələrini söndürür." />
 		<combo_box name="ao_state_selection_combo" tool_tip="Düzəliş üçün animasiya vəziyyətini seçin." />
 		<panel name="ao_animation_move_trash_panel" >
 			<button name="ao_move_up" tool_tip="Seçilmiş animasiyanı siyahıda yuxarıya doğru daşıyın." />

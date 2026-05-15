@@ -45,6 +45,7 @@ FloaterAO::FloaterAO(const LLSD& key)
     mCanDragAndDrop(false),
     mImportRunning(false),
     mCurrentBoldItem(nullptr),
+    mInsideSortCallback(false),
     mMore(true)
 {
     mEventTimer.stop();
@@ -223,6 +224,7 @@ bool FloaterAO::postBuild()
     mOverrideSitsCheckBox = mMainInterfacePanel->getChild<LLCheckBoxCtrl>("ao_sit_override");
     mSmartCheckBox = mMainInterfacePanel->getChild<LLCheckBoxCtrl>("ao_smart");
     mDisableMouselookCheckBox = mMainInterfacePanel->getChild<LLCheckBoxCtrl>("ao_disable_stands_in_mouselook");
+    mAlphaNumSortCheckBox = mMainInterfacePanel->getChild<LLCheckBoxCtrl>("ao_alpha_num_sort");
 
     mStateSelector = mMainInterfacePanel->getChild<LLComboBox>("ao_state_selection_combo");
     mAnimationList = mMainInterfacePanel->getChild<LLScrollListCtrl>("ao_state_animation_list");
@@ -254,6 +256,7 @@ bool FloaterAO::postBuild()
     mOverrideSitsCheckBox->setCommitCallback(boost::bind(&FloaterAO::onCheckOverrideSits, this));
     mSmartCheckBox->setCommitCallback(boost::bind(&FloaterAO::onCheckSmart, this));
     mDisableMouselookCheckBox->setCommitCallback(boost::bind(&FloaterAO::onCheckDisableStands, this));
+    mAlphaNumSortCheckBox->setCommitCallback(boost::bind(&FloaterAO::onCheckAlphaNumSort, this));
 
     mAnimationList->setCommitOnSelectionChange(true);
 
@@ -471,6 +474,29 @@ void FloaterAO::onSelectState()
     mSelectedState = (AOSet::AOState*)mStateSelector->getCurrentUserdata();
     if (mSelectedState->mAnimations.size())
     {
+        // Sort by alphanumeric order if the checkbox is ticked
+        if (mAlphaNumSortCheckBox->getValue().asBoolean())
+        {
+            // Save original only when called from state change, not from the callback
+            if (!mInsideSortCallback)
+            {
+                mOriginalAnimations = mSelectedState->mAnimations;
+            }
+            std::sort(mSelectedState->mAnimations.begin(), mSelectedState->mAnimations.end(),
+                [](const AOSet::AOAnimation& a, const AOSet::AOAnimation& b) -> bool
+                {
+                    return LLStringUtil::compareInsensitive(a.mName, b.mName) < 0;
+                });
+            // Update current animation index to match new position after sorting
+            for (U32 i = 0; i < mSelectedState->mAnimations.size(); ++i)
+            {
+                if (mSelectedState->mAnimations[i].mAssetUUID == mSelectedState->mCurrentAnimationID)
+                {
+                    mSelectedState->mCurrentAnimation = i;
+                    break;
+                }
+            }
+        }
         for (auto index = 0; index < mSelectedState->mAnimations.size(); ++index)
         {
             LLScrollListItem* item = addAnimation(mSelectedState->mAnimations[index].mName);
@@ -636,6 +662,59 @@ void FloaterAO::onCheckDisableStands()
     }
 }
 
+void FloaterAO::onCheckAlphaNumSort()
+{
+    if (!mSelectedState)
+    {
+        return;
+    }
+
+    mInsideSortCallback = true;
+
+    if (mAlphaNumSortCheckBox->getValue().asBoolean())
+    {
+        // Save original order
+        mOriginalAnimations = mSelectedState->mAnimations;
+        // Sort by animation name (case-insensitive)
+        std::sort(mSelectedState->mAnimations.begin(), mSelectedState->mAnimations.end(),
+            [](const AOSet::AOAnimation& a, const AOSet::AOAnimation& b) -> bool
+            {
+                return LLStringUtil::compareInsensitive(a.mName, b.mName) < 0;
+            });
+        // Update current animation index to match new position after sorting
+        for (U32 i = 0; i < mSelectedState->mAnimations.size(); ++i)
+        {
+            if (mSelectedState->mAnimations[i].mAssetUUID == mSelectedState->mCurrentAnimationID)
+            {
+                mSelectedState->mCurrentAnimation = i;
+                break;
+            }
+        }
+        mMoveUpButton->setEnabled(false);
+        mMoveDownButton->setEnabled(false);
+    }
+    else
+    {
+        // Restore original order if we have a saved copy
+        if (!mOriginalAnimations.empty())
+        {
+            mSelectedState->mAnimations = mOriginalAnimations;
+            mOriginalAnimations.clear();
+            // Update current animation index to match restored position
+            for (U32 i = 0; i < mSelectedState->mAnimations.size(); ++i)
+            {
+                if (mSelectedState->mAnimations[i].mAssetUUID == mSelectedState->mCurrentAnimationID)
+                {
+                    mSelectedState->mCurrentAnimation = i;
+                    break;
+                }
+            }
+        }
+    }
+    onSelectState();
+    mInsideSortCallback = false;
+}
+
 void FloaterAO::onChangeAnimationSelection()
 {
     std::vector<LLScrollListItem*> list = mAnimationList->getAllSelected();
@@ -659,6 +738,12 @@ void FloaterAO::onChangeAnimationSelection()
             resortEnable = true;
         }
         trashEnable = true;
+    }
+
+    // When alpha-num sort is active, disable move up/down buttons
+    if (mAlphaNumSortCheckBox->getValue().asBoolean())
+    {
+        resortEnable = false;
     }
 
     mMoveDownButton->setEnabled(resortEnable);
