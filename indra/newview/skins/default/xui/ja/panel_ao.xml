@@ -10,6 +10,7 @@
 		<check_box name="ao_sit_override" label="座るを上書き" tool_tip="座るアニメーションをオーバーライドする場合は、これをチェックします。"/>
 		<check_box name="ao_smart" label="スマートモード" tool_tip="スマートモードは、座るオーバーライドが、オブジェクト自体のアニメーションと衝突するかどうかを判断し、オーバーライダーを一時的に無効にします。"/>
 		<check_box name="ao_disable_stands_in_mouselook" label="立ったときにマウスルックを無効化" tool_tip="カスタムスタンドアニメーションをマウスルックで保持する必要がある場合は、このボックスをオンにします。"/>
+		<check_box name="ao_date_sort" label="Date Sort" tool_tip="アニメーションを取得日順（新しい順）に並べ替えます。上下移動を無効にします。"/>
 		<check_box name="ao_alpha_num_sort" label="alpha/Num Sort" tool_tip="リスト内のアニメーションを英数字順に並べ替えます。上下移動を無効にします。"/>
 		<combo_box name="ao_state_selection_combo" tool_tip="編集するアニメーションの状態を選択します。"/>
 		<panel name="ao_animation_move_trash_panel">

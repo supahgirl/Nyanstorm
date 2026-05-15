@@ -35,6 +35,7 @@
 #include "llnotificationsutil.h"
 #include "llspinctrl.h"
 #include "llviewercontrol.h"
+#include "llinventorymodel.h"
 #include "utilitybar.h"
 
 FloaterAO::FloaterAO(const LLSD& key)
@@ -46,6 +47,7 @@ FloaterAO::FloaterAO(const LLSD& key)
     mImportRunning(false),
     mCurrentBoldItem(nullptr),
     mInsideSortCallback(false),
+    mInsideDateSortCallback(false),
     mMore(true)
 {
     mEventTimer.stop();
@@ -225,6 +227,7 @@ bool FloaterAO::postBuild()
     mSmartCheckBox = mMainInterfacePanel->getChild<LLCheckBoxCtrl>("ao_smart");
     mDisableMouselookCheckBox = mMainInterfacePanel->getChild<LLCheckBoxCtrl>("ao_disable_stands_in_mouselook");
     mAlphaNumSortCheckBox = mMainInterfacePanel->getChild<LLCheckBoxCtrl>("ao_alpha_num_sort");
+    mDateSortCheckBox = mMainInterfacePanel->getChild<LLCheckBoxCtrl>("ao_date_sort");
 
     mStateSelector = mMainInterfacePanel->getChild<LLComboBox>("ao_state_selection_combo");
     mAnimationList = mMainInterfacePanel->getChild<LLScrollListCtrl>("ao_state_animation_list");
@@ -257,6 +260,7 @@ bool FloaterAO::postBuild()
     mSmartCheckBox->setCommitCallback(boost::bind(&FloaterAO::onCheckSmart, this));
     mDisableMouselookCheckBox->setCommitCallback(boost::bind(&FloaterAO::onCheckDisableStands, this));
     mAlphaNumSortCheckBox->setCommitCallback(boost::bind(&FloaterAO::onCheckAlphaNumSort, this));
+    mDateSortCheckBox->setCommitCallback(boost::bind(&FloaterAO::onCheckDateSort, this));
 
     mAnimationList->setCommitOnSelectionChange(true);
 
@@ -497,6 +501,16 @@ void FloaterAO::onSelectState()
                 }
             }
         }
+        // Sort by acquisition date if the checkbox is ticked
+        if (mDateSortCheckBox->getValue().asBoolean())
+        {
+            // Save original only when called from state change, not from the callback
+            if (!mInsideDateSortCallback)
+            {
+                mOriginalAnimationsDateSort = mSelectedState->mAnimations;
+            }
+            sortStateByDate();
+        }
         for (auto index = 0; index < mSelectedState->mAnimations.size(); ++index)
         {
             LLScrollListItem* item = addAnimation(mSelectedState->mAnimations[index].mName);
@@ -664,7 +678,7 @@ void FloaterAO::onCheckDisableStands()
 
 void FloaterAO::onCheckAlphaNumSort()
 {
-    if (!mSelectedState)
+    if (mInsideSortCallback || mInsideDateSortCallback || !mSelectedState)
     {
         return;
     }
@@ -673,6 +687,9 @@ void FloaterAO::onCheckAlphaNumSort()
 
     if (mAlphaNumSortCheckBox->getValue().asBoolean())
     {
+        // Mutual exclusivity: uncheck date sort
+        mDateSortCheckBox->setValue(false);
+
         // Save original order
         mOriginalAnimations = mSelectedState->mAnimations;
         // Sort by animation name (case-insensitive)
@@ -715,6 +732,97 @@ void FloaterAO::onCheckAlphaNumSort()
     mInsideSortCallback = false;
 }
 
+void FloaterAO::onCheckDateSort()
+{
+    if (mInsideSortCallback || mInsideDateSortCallback || !mSelectedState)
+    {
+        return;
+    }
+
+    mInsideDateSortCallback = true;
+
+    if (mDateSortCheckBox->getValue().asBoolean())
+    {
+        // Mutual exclusivity: uncheck alpha/num sort
+        mAlphaNumSortCheckBox->setValue(false);
+
+        // Save original order
+        mOriginalAnimationsDateSort = mSelectedState->mAnimations;
+        sortStateByDate();
+        mMoveUpButton->setEnabled(false);
+        mMoveDownButton->setEnabled(false);
+    }
+    else
+    {
+        // Restore original order if we have a saved copy
+        if (!mOriginalAnimationsDateSort.empty())
+        {
+            mSelectedState->mAnimations = mOriginalAnimationsDateSort;
+            mOriginalAnimationsDateSort.clear();
+            // Update current animation index to match restored position
+            for (U32 i = 0; i < mSelectedState->mAnimations.size(); ++i)
+            {
+                if (mSelectedState->mAnimations[i].mAssetUUID == mSelectedState->mCurrentAnimationID)
+                {
+                    mSelectedState->mCurrentAnimation = i;
+                    break;
+                }
+            }
+        }
+    }
+    onSelectState();
+    mInsideDateSortCallback = false;
+}
+
+void FloaterAO::sortStateByDate()
+{
+    if (!mSelectedState || mSelectedState->mAnimations.empty())
+    {
+        return;
+    }
+
+    auto& anims = mSelectedState->mAnimations;
+    const size_t n = anims.size();
+
+    // Pre-compute dates using the original UUID (true acquisition date), fallback to inventory UUID
+    std::vector<time_t> dates(n);
+    for (size_t i = 0; i < n; ++i)
+    {
+        const LLUUID& lookupId = anims[i].mOriginalUUID.notNull()
+            ? anims[i].mOriginalUUID
+            : anims[i].mInventoryUUID;
+        LLViewerInventoryItem* item = gInventory.getItem(lookupId);
+        dates[i] = item ? item->getCreationDate() : std::numeric_limits<time_t>::max();
+    }
+
+    // Stable sort by date (newest first, missing dates first)
+    std::vector<size_t> indices(n);
+    for (size_t i = 0; i < n; ++i)
+    {
+        indices[i] = i;
+    }
+    std::stable_sort(indices.begin(), indices.end(),
+        [&dates](size_t i, size_t j) { return dates[i] > dates[j]; });
+
+    // Reorder animations
+    std::vector<AOSet::AOAnimation> sorted(n);
+    for (size_t i = 0; i < n; ++i)
+    {
+        sorted[i] = std::move(anims[indices[i]]);
+    }
+    anims = std::move(sorted);
+
+    // Update current animation index
+    for (U32 i = 0; i < anims.size(); ++i)
+    {
+        if (anims[i].mAssetUUID == mSelectedState->mCurrentAnimationID)
+        {
+            mSelectedState->mCurrentAnimation = i;
+            break;
+        }
+    }
+}
+
 void FloaterAO::onChangeAnimationSelection()
 {
     std::vector<LLScrollListItem*> list = mAnimationList->getAllSelected();
@@ -742,6 +850,12 @@ void FloaterAO::onChangeAnimationSelection()
 
     // When alpha-num sort is active, disable move up/down buttons
     if (mAlphaNumSortCheckBox->getValue().asBoolean())
+    {
+        resortEnable = false;
+    }
+
+    // When date sort is active, disable move up/down buttons
+    if (mDateSortCheckBox->getValue().asBoolean())
     {
         resortEnable = false;
     }

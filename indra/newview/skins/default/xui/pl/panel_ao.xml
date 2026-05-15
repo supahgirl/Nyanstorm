@@ -9,6 +9,7 @@
 		<check_box name="ao_sit_override" label="Siadanie" tool_tip="Zaznacz tą opcję, jeśli Animator ma też podmieniać animacje siedzenia." />
 		<check_box name="ao_smart" label="Sprytnie" tool_tip="Ten tryb próbuje zapobiegać sytuacjom, w których Animator koliduje z wewnętrznymi animacjami obiektu - i wyłącza tymczasowo podmienianie." />
 		<check_box name="ao_disable_stands_in_mouselook" label="Wyłącz w trybie 1 osoby" tool_tip="Jeśli chcesz zachować własną animację stania w miejscu, będąc w trybie pierwszoosobowym (mouselook), to zaznacz tą opcję." />
+		<check_box name="ao_date_sort" label="Date Sort" tool_tip="Sortuj animacje według daty nabycia (najnowsze najpierw). Wyłącza przyciski góra/dół." />
 		<check_box name="ao_alpha_num_sort" label="alpha/Num Sort" tool_tip="Sortuj animacje na liście w kolejności alfanumerycznej. Wyłącza przyciski góra/dół." />
 		<combo_box name="ao_state_selection_combo" tool_tip="Wybierz stan animacji do edycji." />
 		<panel name="ao_animation_move_trash_panel">
