@@ -9,6 +9,7 @@
 		<check_box name="ao_sit_override" label="Sentadas" tool_tip="Activa si quieres sustituir las animaciones de sentarse."/>
 		<check_box name="ao_smart" label="Inteligente" tool_tip="El modo inteligente trata de determinar si la animación de sentarse va a interferir con la animación propia del objeto en el que te sientas, y la desactiva temporalmente"/>
 		<check_box name="ao_disable_stands_in_mouselook" label="Desactivar postura 'de pie' en vista subjetiva" tool_tip="Si quieres preservar tu animación personalizada para estar de pie en vista subjetiva, activa esta casilla."/>
+		<check_box name="ao_date_sort" label="Date Sort" tool_tip="Ordenar animaciones por fecha de adquisición (más reciente primero). Desactiva subir/bajar."/>
 		<check_box name="ao_alpha_num_sort" label="alpha/Num Sort" tool_tip="Ordenar animaciones en la lista por orden alfanumérico. Desactiva subir/bajar."/>
 		<combo_box name="ao_state_selection_combo" tool_tip="Selecciona el estado de animación a editar."/>
 		<panel name="ao_animation_move_trash_panel">

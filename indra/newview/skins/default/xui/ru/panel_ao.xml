@@ -11,6 +11,7 @@
 		<check_box name="ao_smart" label="Умный" tool_tip="Интеллектуальный режим пытается определить, будет ли переопределение сидячего конфликтовать с собственной анимацией объекта, и временно отключит переопределение."
 			left_pad="4" right="-1" height="16" />
 		<check_box name="ao_disable_stands_in_mouselook" label="Откл. Позы в Mouselook" tool_tip="Если вам необходимо сохранить собственную анимацию позы в Mouselook, установите этот флажок." width="100" />
+		<check_box name="ao_date_sort" label="Date Sort" tool_tip="Сортировать анимации по дате приобретения (сначала новые). Отключает кнопки вверх/вниз." />
 		<check_box name="ao_alpha_num_sort" label="alpha/Num Sort" tool_tip="Сортировать анимации в списке по алфавитно-цифровому порядку. Отключает кнопки вверх/вниз." />
 		<combo_box name="ao_state_selection_combo" tool_tip="Выберите состояние анимации для редактирования." />
 		<panel name="ao_animation_move_trash_panel" >
