@@ -9,6 +9,8 @@
 		<check_box name="ao_sit_override" label="Outrepasser assis." tool_tip="Activer cette option pour que les animations de l'ao soient prioritaires sur celles de l'objet."/>
 		<check_box name="ao_smart" label="Intell." left_pad="20" tool_tip="Le mode intelligent détermine si outrepasser les poses assises entrera en conflit avec les animations des objets, et arrêtera de passer outre temporairement."/>
 		<check_box name="ao_disable_stands_in_mouselook" label="Désact. debout en 1ère pers." tool_tip="Si vous avez besoin de garder vos animations personelles en vue subjective, cochez cette case."/>
+		<check_box name="ao_date_sort" label="Date Sort" tool_tip="Trier par date d'acquisition (plus recent en premier). Desactive haut/bas."/>
+		<check_box name="ao_alpha_num_sort" label="alpha/Num Sort" tool_tip="Trier les animations par ordre alphabetique. Desactive haut/bas."/>
 		<combo_box name="ao_state_selection_combo" tool_tip="Sélectionner l'état d'animation à éditer."/>
 		<panel name="ao_animation_move_trash_panel">
 			<button name="ao_move_up" tool_tip="Déplacer l'animation sélectionnée plus haut dans la liste."/>

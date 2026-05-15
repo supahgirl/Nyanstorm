@@ -12,6 +12,7 @@
 		<check_box name="ao_sit_override" label="Sitzen überst." tool_tip="Aktiviert die Übersteuerung von Sitzanimationen."/>
 		<check_box name="ao_smart" label="Smart-Modus" tool_tip="Smart-Modus versucht zu erkennen, ob das Übersteuern von Sitzanimationen mit der des Objektes, auf dem gesessen wird, kollidiert. In diesem Fall wird der Animation Overrider temporär deaktiviert." left_pad="-6"/>
 		<check_box name="ao_disable_stands_in_mouselook" label="Stand im Mouselook deakt." tool_tip="Deaktiviert benutzerdefinierte Stand-Animationen im Mouselook-Modus."/>
+		<check_box name="ao_alpha_num_sort" label="alpha/Num Sort" tool_tip="Sortiert die Animationen in der Liste nach alphanumerischer Reihenfolge. Deaktiviert Aufwärts/Abwärts."/>
 		<combo_box name="ao_state_selection_combo" tool_tip="Animationstyp zum Editieren auswählen."/>
 
 		<panel name="ao_animation_move_trash_panel">
