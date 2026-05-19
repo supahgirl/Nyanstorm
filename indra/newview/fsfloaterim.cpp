@@ -74,6 +74,8 @@
 #include "llinventorymodel.h"
 #include "lllayoutstack.h"
 #include "lllogchat.h"
+#include "llmenugl.h"
+#include "llviewermenu.h"
 #include "llnotifications.h"
 #include "llnotificationsutil.h"
 #include "llnotificationtemplate.h"     // <FS:Zi> Viewer version popup
@@ -1471,6 +1473,68 @@ void FSFloaterIM::onChatSearchButtonClicked()
     LLFloaterSearchReplace::show(mChatHistory);
 }
 
+void FSFloaterIM::onAgentButtonClicked()
+{
+    if (!mAgentBtn) return;
+
+    S32 x, y;
+    mAgentBtn->localPointToScreen(0, 0, &x, &y);
+
+    const widget_registry_t& registry = LLViewerMenuHolderGL::child_registry_t::instance();
+    LLContextMenu* menu = LLUICtrlFactory::createFromFile<LLContextMenu>("menu_fs_agent_select.xml", gMenuHolder, registry);
+    if (menu)
+    {
+        LLMenuItemCheckGL* itemNone = menu->getChild<LLMenuItemCheckGL>("agent_none");
+        LLMenuItemCheckGL* item1 = menu->getChild<LLMenuItemCheckGL>("agent_1");
+        LLMenuItemCheckGL* item2 = menu->getChild<LLMenuItemCheckGL>("agent_2");
+
+        if (itemNone)
+        {
+            itemNone->setCommitCallback(boost::bind(&FSFloaterIM::onSelectAgent, this, LLSD("none")));
+            itemNone->setCheckCallback([this](LLUICtrl*, const LLSD&) { return mSelectedAgentSessionID.isNull(); });
+        }
+
+        if (item1)
+        {
+            item1->setCheckCallback([this](LLUICtrl*, const LLSD&) { return mSelectedAgentSessionID == AI_AGENT_SESSION_ID; });
+            std::string name = "AI Agent 1";
+            if (gSavedSettings.controlExists("FSAIAgentName1"))
+                name = gSavedSettings.getString("FSAIAgentName1");
+            item1->setLabel(name);
+            item1->setCommitCallback(boost::bind(&FSFloaterIM::onSelectAgent, this, LLSD("agent1")));
+        }
+
+        if (item2)
+        {
+            item2->setCheckCallback([this](LLUICtrl*, const LLSD&) { return mSelectedAgentSessionID == AI_AGENT_2_SESSION_ID; });
+            std::string name = "AI Agent 2";
+            if (gSavedSettings.controlExists("FSAIAgentName2"))
+                name = gSavedSettings.getString("FSAIAgentName2");
+            item2->setLabel(name);
+            item2->setCommitCallback(boost::bind(&FSFloaterIM::onSelectAgent, this, LLSD("agent2")));
+        }
+
+        menu->show(x, y);
+    }
+}
+
+void FSFloaterIM::onSelectAgent(const LLSD& userdata)
+{
+    std::string agent = userdata.asString();
+    if (agent == "agent1")
+    {
+        mSelectedAgentSessionID = AI_AGENT_SESSION_ID;
+    }
+    else if (agent == "agent2")
+    {
+        mSelectedAgentSessionID = AI_AGENT_2_SESSION_ID;
+    }
+    else
+    {
+        mSelectedAgentSessionID = LLUUID::null;
+    }
+}
+
 void FSFloaterIM::sendMsg(const std::string& msg)
 {
     //  const std::string utf8_text = utf8str_truncate(msg, MAX_MSG_BUF_SIZE - 1);
@@ -2069,6 +2133,9 @@ bool FSFloaterIM::postBuild()
 
     getChild<LLButton>("send_chat")->setCommitCallback(boost::bind(&FSFloaterIM::sendMsgFromInputEditor, this, CHAT_TYPE_NORMAL));
     getChild<LLButton>("chat_search_btn")->setCommitCallback(boost::bind(&FSFloaterIM::onChatSearchButtonClicked, this));
+
+    mAgentBtn = getChild<LLButton>("agent_menu_btn");
+    mAgentBtn->setCommitCallback(boost::bind(&FSFloaterIM::onAgentButtonClicked, this));
 
     const bool isFSSupportGroup = FSData::getInstance()->isFirestormGroup(mSessionID);
     const bool isFSTestingGroup = FSData::getInstance()->isTestingGroup(mSessionID);
@@ -2850,6 +2917,21 @@ void FSFloaterIM::updateMessages()
             else
             {
                 chat.mText = message;
+
+                // Forward to selected AI agent if this is an incoming message from another participant
+                if (mSelectedAgentSessionID.notNull() && from_id != gAgent.getID() && !is_history && !message.empty())
+                {
+                    FSFloaterIM* agent_floater = FSFloaterIM::findInstance(mSelectedAgentSessionID);
+                    if (!agent_floater)
+                    {
+                        agent_floater = FSFloaterIM::getInstance(mSelectedAgentSessionID);
+                    }
+                    if (agent_floater)
+                    {
+                        std::string forward_msg = "[" + from + "] " + message;
+                        agent_floater->sendMsg(forward_msg);
+                    }
+                }
             }
 
             static const LLStyle::Params input_append_params = LLStyle::Params();

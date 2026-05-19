@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<context_menu name="Agent Select Menu" opaque="true" visible="false">
+
+  <menu_item_check
+    label="none"
+    name="agent_none">
+  </menu_item_check>
+
+  <menu_item_separator/>
+
+  <menu_item_check
+    label="Agent 1"
+    name="agent_1">
+  </menu_item_check>
+
+  <menu_item_check
+    label="Agent 2"
+    name="agent_2">
+  </menu_item_check>
+
+</context_menu>
