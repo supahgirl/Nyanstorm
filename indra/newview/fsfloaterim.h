@@ -124,6 +124,8 @@ public:
     static void clearAllOpenHistories();    // <FS:CR> FIRE-11734
 
     void onChatSearchButtonClicked();
+    void onAgentButtonClicked();
+    void onSelectAgent(const LLSD& userdata);
 
     bool handleDragAndDrop(S32 x, S32 y, MASK mask,
                            bool drop, EDragAndDropType cargo_type,
@@ -275,6 +277,8 @@ private:
     LLTextBox* mUnreadMessagesNotificationTextBox;
     LLButton* mEmojiRecentPanelToggleBtn;
     LLButton* mEmojiPickerToggleBtn;
+    LLButton* mAgentBtn;
+    LLUUID mSelectedAgentSessionID;
     LLLayoutPanel* mEmojiRecentPanel;
     LLTextBox* mEmojiRecentEmptyText;
     LLPanelEmojiComplete* mEmojiRecentIconsCtrl;
