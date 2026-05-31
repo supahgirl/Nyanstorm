@@ -80,6 +80,7 @@ class FloaterAO
         void onCheckSmart();
         void onCheckDisableStands();
         void onCheckAlphaNumSort();
+        void onCheckLocal();
         void onCheckDateSort();
         void sortStateByDate();
         void onClickMoveUp();
@@ -90,6 +91,10 @@ class FloaterAO
         void onChangeCycleTime();
         void onClickPrevious();
         void onClickNext();
+
+        void localPreview(const LLUUID& anim_id);
+        void localPreviewAdjacent(bool next);
+        void refreshItemStyling();
 
         void onClickMore();
         void onClickLess();
@@ -129,6 +134,7 @@ class FloaterAO
         LLCheckBoxCtrl* mSmartCheckBox;
         LLCheckBoxCtrl* mDisableMouselookCheckBox;
         LLCheckBoxCtrl* mAlphaNumSortCheckBox;
+        LLCheckBoxCtrl* mLocalCheckBox;
         LLCheckBoxCtrl* mDateSortCheckBox;
         std::vector<AOSet::AOAnimation> mOriginalAnimations;
         std::vector<AOSet::AOAnimation> mOriginalAnimationsDateSort;
@@ -138,6 +144,7 @@ class FloaterAO
         LLComboBox* mStateSelector;
         LLScrollListCtrl* mAnimationList;
         LLScrollListItem* mCurrentBoldItem;
+        LLUUID mLocalAnimationID;
         LLButton* mMoveUpButton;
         LLButton* mMoveDownButton;
         LLButton* mTrashButton;

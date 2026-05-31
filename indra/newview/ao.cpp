@@ -46,6 +46,8 @@ FloaterAO::FloaterAO(const LLSD& key)
     mCanDragAndDrop(false),
     mImportRunning(false),
     mCurrentBoldItem(nullptr),
+    mLocalCheckBox(nullptr),
+    mLocalAnimationID(LLUUID::null),
     mInsideSortCallback(false),
     mInsideDateSortCallback(false),
     mMore(true)
@@ -227,6 +229,7 @@ bool FloaterAO::postBuild()
     mSmartCheckBox = mMainInterfacePanel->getChild<LLCheckBoxCtrl>("ao_smart");
     mDisableMouselookCheckBox = mMainInterfacePanel->getChild<LLCheckBoxCtrl>("ao_disable_stands_in_mouselook");
     mAlphaNumSortCheckBox = mMainInterfacePanel->getChild<LLCheckBoxCtrl>("ao_alpha_num_sort");
+    mLocalCheckBox = mMainInterfacePanel->getChild<LLCheckBoxCtrl>("ao_local");
     mDateSortCheckBox = mMainInterfacePanel->getChild<LLCheckBoxCtrl>("ao_date_sort");
 
     mStateSelector = mMainInterfacePanel->getChild<LLComboBox>("ao_state_selection_combo");
@@ -260,6 +263,7 @@ bool FloaterAO::postBuild()
     mSmartCheckBox->setCommitCallback(boost::bind(&FloaterAO::onCheckSmart, this));
     mDisableMouselookCheckBox->setCommitCallback(boost::bind(&FloaterAO::onCheckDisableStands, this));
     mAlphaNumSortCheckBox->setCommitCallback(boost::bind(&FloaterAO::onCheckAlphaNumSort, this));
+    mLocalCheckBox->setCommitCallback(boost::bind(&FloaterAO::onCheckLocal, this));
     mDateSortCheckBox->setCommitCallback(boost::bind(&FloaterAO::onCheckDateSort, this));
 
     mAnimationList->setCommitOnSelectionChange(true);
@@ -457,6 +461,13 @@ LLScrollListItem* FloaterAO::addAnimation(const std::string& name)
 
 void FloaterAO::onSelectState()
 {
+    // Stop any local preview and clear state
+    if (mLocalAnimationID.notNull())
+    {
+        gAgentAvatarp->LLCharacter::stopMotion(mLocalAnimationID);
+        mLocalAnimationID.setNull();
+    }
+
     mAnimationList->deleteAllItems();
     mCurrentBoldItem = nullptr;
     mAnimationList->setCommentText(getString("ao_no_animations_loaded"));
@@ -774,6 +785,210 @@ void FloaterAO::onCheckDateSort()
     mInsideDateSortCallback = false;
 }
 
+void FloaterAO::onCheckLocal()
+{
+    if (!mLocalCheckBox) return;
+
+    if (mLocalCheckBox->getValue().asBoolean())
+    {
+        // Local mode ON — no immediate action; subsequent selections
+        // will preview locally instead of changing the world animation.
+    }
+    else
+    {
+        // Local mode OFF — promote the last local preview to in-world,
+        // then clear local state and restore default styling.
+        if (mLocalAnimationID.notNull())
+        {
+            // Resolve asset UUID back to inventory UUID for playAnimation()
+            LLUUID inv_id = mLocalAnimationID;
+            if (mSelectedState)
+            {
+                for (const auto& anim : mSelectedState->mAnimations)
+                {
+                    if (anim.mAssetUUID == mLocalAnimationID)
+                    {
+                        inv_id = anim.mInventoryUUID;
+                        break;
+                    }
+                }
+            }
+            AOEngine::instance().playAnimation(inv_id);
+            mLocalAnimationID.setNull();
+        }
+        refreshItemStyling();
+    }
+}
+
+void FloaterAO::localPreview(const LLUUID& anim_id)
+{
+    if (anim_id.isNull()) return;
+
+    // Resolve to asset UUID: callers may pass either inventory or asset UUID.
+    LLUUID asset_id = anim_id;
+    if (mSelectedState)
+    {
+        for (const auto& anim : mSelectedState->mAnimations)
+        {
+            if (anim.mInventoryUUID == anim_id || anim.mAssetUUID == anim_id)
+            {
+                asset_id = anim.mAssetUUID;
+                break;
+            }
+        }
+    }
+
+    // Skip if the same animation is already previewing
+    if (mLocalAnimationID == asset_id)
+    {
+        return;
+    }
+
+    // Stop previous local preview if any
+    if (mLocalAnimationID.notNull())
+    {
+        gAgentAvatarp->LLCharacter::stopMotion(mLocalAnimationID);
+    }
+
+    // Start new local-only preview (asset UUID required for startMotion)
+    gAgentAvatarp->LLCharacter::startMotion(asset_id);
+    mLocalAnimationID = asset_id;
+    refreshItemStyling();
+}
+
+void FloaterAO::localPreviewAdjacent(bool next)
+{
+    if (!mSelectedState || mSelectedState->mAnimations.empty()) return;
+
+    // Seed from current in-world animation on first use (mLocalAnimationID is null)
+    if (mLocalAnimationID.isNull())
+    {
+        // If no in-world animation is playing, pick the first animation
+        LLUUID seed_id = mSelectedState->mCurrentAnimationID;
+        if (seed_id.isNull() && !mSelectedState->mAnimations.empty())
+        {
+            seed_id = mSelectedState->mAnimations[0].mAssetUUID;
+        }
+        if (seed_id.isNull()) return;
+
+        mLocalAnimationID = seed_id;
+        // Fall through to cycle from the seed
+    }
+
+    // Find current local animation index
+    S32 idx = -1;
+    const auto& anims = mSelectedState->mAnimations;
+    for (S32 i = 0; i < (S32)anims.size(); ++i)
+    {
+        if (anims[i].mAssetUUID == mLocalAnimationID)
+        {
+            idx = i;
+            break;
+        }
+    }
+    if (idx < 0) return;
+
+    S32 new_idx = next ? (idx + 1) % anims.size()
+                       : (idx - 1 + anims.size()) % anims.size();
+
+    localPreview(anims[new_idx].mAssetUUID);
+}
+
+void FloaterAO::refreshItemStyling()
+{
+    if (!mAnimationList) return;
+
+    bool local_active = mLocalCheckBox && mLocalCheckBox->getValue().asBoolean();
+    LLUUID current_ao_id;
+    if (mSelectedState)
+    {
+        current_ao_id = mSelectedState->mCurrentAnimationID;
+    }
+
+    std::vector<LLScrollListItem*> data = mAnimationList->getAllData();
+    for (S32 i = 0; i < (S32)data.size(); ++i)
+    {
+        LLScrollListItem* item = data[i];
+        LLUUID* id = static_cast<LLUUID*>(item->getUserdata());
+        if (!id) continue;
+
+        LLScrollListCell* icon_cell = item->getColumn(0);
+        LLScrollListCell* text_cell = item->getColumn(1);
+
+        // Determine if this item holds the current in-world AO animation or the
+        // local-preview animation.  Scroll items carry mInventoryUUID as userdata;
+        // mCurrentAnimationID and mLocalAnimationID are asset UUIDs.
+        // Compare via the parallel mAnimations array (same order as scroll items).
+        bool is_local = false;
+        bool is_current = false;
+        if (mSelectedState && i < (S32)mSelectedState->mAnimations.size())
+        {
+            is_local  = (local_active && mLocalAnimationID.notNull()
+                         && mSelectedState->mAnimations[i].mAssetUUID == mLocalAnimationID);
+            is_current = (current_ao_id.notNull()
+                          && mSelectedState->mAnimations[i].mAssetUUID == current_ao_id);
+        }
+
+        if (is_local)
+        {
+            // Red highlight for local-only preview
+            if (icon_cell)
+            {
+                if (LLScrollListIcon* icon = dynamic_cast<LLScrollListIcon*>(icon_cell))
+                {
+                    icon->setValue("FSAO_Animation_Playing");
+                }
+            }
+            if (text_cell)
+            {
+                if (LLScrollListText* text = dynamic_cast<LLScrollListText*>(text_cell))
+                {
+                    text->setFontStyle(LLFontGL::NORMAL);
+                    text->setColor(LLColor4::red);
+                }
+            }
+        }
+        else if (is_current)
+        {
+            // Bold for current in-world AO animation (green in local mode)
+            if (icon_cell)
+            {
+                if (LLScrollListIcon* icon = dynamic_cast<LLScrollListIcon*>(icon_cell))
+                {
+                    icon->setValue("FSAO_Animation_Playing");
+                }
+            }
+            if (text_cell)
+            {
+                if (LLScrollListText* text = dynamic_cast<LLScrollListText*>(text_cell))
+                {
+                    text->setFontStyle(LLFontGL::BOLD);
+                    text->setColor(local_active ? LLColor4::green : LLColor4::white);
+                }
+            }
+        }
+        else
+        {
+            // Normal / stopped
+            if (icon_cell)
+            {
+                if (LLScrollListIcon* icon = dynamic_cast<LLScrollListIcon*>(icon_cell))
+                {
+                    icon->setValue("FSAO_Animation_Stopped");
+                }
+            }
+            if (text_cell)
+            {
+                if (LLScrollListText* text = dynamic_cast<LLScrollListText*>(text_cell))
+                {
+                    text->setFontStyle(LLFontGL::NORMAL);
+                    text->setColor(LLColor4::white);
+                }
+            }
+        }
+    }
+}
+
 void FloaterAO::sortStateByDate()
 {
     if (!mSelectedState || mSelectedState->mAnimations.empty())
@@ -827,6 +1042,20 @@ void FloaterAO::onChangeAnimationSelection()
 {
     std::vector<LLScrollListItem*> list = mAnimationList->getAllSelected();
     LL_DEBUGS("AOEngine") << "Selection count: " << list.size() << LL_ENDL;
+
+    // Local mode: single selection previews locally, not in-world
+    if (mLocalCheckBox && mLocalCheckBox->getValue().asBoolean())
+    {
+        if (!list.empty() && list.size() == 1)
+        {
+            LLUUID* animUUID = (LLUUID*)list[0]->getUserdata();
+            if (animUUID)
+            {
+                localPreview(*animUUID);
+            }
+        }
+        return;
+    }
 
     bool resortEnable = false;
     bool trashEnable = false;
@@ -975,11 +1204,21 @@ void FloaterAO::onChangeCycleTime()
 
 void FloaterAO::onClickPrevious()
 {
+    if (mLocalCheckBox && mLocalCheckBox->getValue().asBoolean())
+    {
+        localPreviewAdjacent(false);
+        return;
+    }
     AOEngine::instance().cycle(AOEngine::CyclePrevious, true);
 }
 
 void FloaterAO::onClickNext()
 {
+    if (mLocalCheckBox && mLocalCheckBox->getValue().asBoolean())
+    {
+        localPreviewAdjacent(true);
+        return;
+    }
     AOEngine::instance().cycle(AOEngine::CycleNext, true);
 }
 
@@ -993,6 +1232,13 @@ void FloaterAO::onDoubleClick()
     LLUUID* animUUID = (LLUUID*)item->getUserdata();
     if (!animUUID)
     {
+        return;
+    }
+
+    // Local mode: double-click previews locally
+    if (mLocalCheckBox && mLocalCheckBox->getValue().asBoolean())
+    {
+        localPreview(*animUUID);
         return;
     }
 
@@ -1068,27 +1314,12 @@ void FloaterAO::onAnimationChanged(const LLUUID& animation)
 
     if (mCurrentBoldItem)
     {
-        if (LLScrollListCell* icon_cell = mCurrentBoldItem->getColumn(0))
-        {
-            if (LLScrollListIcon* icon = dynamic_cast<LLScrollListIcon*>(icon_cell))
-            {
-                icon->setValue("FSAO_Animation_Stopped");
-            }
-        }
-
-        if (LLScrollListCell* text_cell = mCurrentBoldItem->getColumn(1))
-        {
-            if (LLScrollListText* text = dynamic_cast<LLScrollListText*>(text_cell))
-            {
-                text->setFontStyle(LLFontGL::NORMAL);
-            }
-        }
-
         mCurrentBoldItem = nullptr;
     }
 
     if (animation.isNull())
     {
+        refreshItemStyling();
         return;
     }
 
@@ -1098,33 +1329,18 @@ void FloaterAO::onAnimationChanged(const LLUUID& animation)
         return;
     }
 
-    // why do we have no LLScrollListCtrl::getItemByUserdata() ? -Zi
+    // Update mCurrentBoldItem for compatibility, but let refreshItemStyling() handle visuals
     for (LLScrollListItem* item : mAnimationList->getAllData())
     {
         LLUUID* id = static_cast<LLUUID*>(item->getUserdata());
         if (id && *id == animation)
         {
             mCurrentBoldItem = item;
-
-            if (LLScrollListCell* icon_cell = mCurrentBoldItem->getColumn(0))
-            {
-                if (LLScrollListIcon* icon = dynamic_cast<LLScrollListIcon*>(icon_cell))
-                {
-                    icon->setValue("FSAO_Animation_Playing");
-                }
-            }
-
-            if (LLScrollListCell* text_cell = mCurrentBoldItem->getColumn(1))
-            {
-                if (LLScrollListText* text = dynamic_cast<LLScrollListText*>(text_cell))
-                {
-                    text->setFontStyle(LLFontGL::BOLD);
-                }
-            }
-
-            return;
+            break;
         }
     }
+
+    refreshItemStyling();
 }
 
 // virtual
