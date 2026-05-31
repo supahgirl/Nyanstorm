@@ -1696,14 +1696,32 @@ void FSFloaterAIConfig::onSaveFileSelected(const std::vector<std::string>& filen
 {
     if (filenames.empty()) return;
 
-    const AIConfigState& cfg = sConfigs[mCurrentSessionID];
     std::string selected = filenames[0];
-    size_t sep = selected.find_last_of("/\\");
-    std::string dir = (sep != std::string::npos) ? selected.substr(0, sep + 1) : "./";
-    std::string output_path = dir + cfg.name + ".json";
+    std::string output_path = selected;
+
+    // Extraire le nom du fichier (sans extension) pour synchroniser cfg.name
+    size_t last_slash = selected.find_last_of("/\\");
+    size_t last_dot = selected.find_last_of(".");
+    std::string name_without_ext;
+    if (last_slash != std::string::npos && last_dot != std::string::npos && last_dot > last_slash)
+    {
+        name_without_ext = selected.substr(last_slash + 1, last_dot - last_slash - 1);
+    }
+    else if (last_slash != std::string::npos)
+    {
+        name_without_ext = selected.substr(last_slash + 1);
+    }
+    else
+    {
+        name_without_ext = selected;
+    }
+
+    // Update sConfigs and the UI with the file name
+    sConfigs[mCurrentSessionID].name = name_without_ext;
+    getChild<LLLineEditor>("ai_config_name")->setText(name_without_ext);
 
     boost::json::object obj;
-    obj["name"]         = cfg.name;
+    obj["name"]         = name_without_ext;
     obj["persona"]      = getChild<LLTextEditor>("ai_config_persona")->getText();
     obj["instructions"] = getChild<LLTextEditor>("ai_config_instructions")->getText();
     obj["web_tools"]    = getChild<LLCheckBoxCtrl>("ai_config_web_search")->getValue().asBoolean();
