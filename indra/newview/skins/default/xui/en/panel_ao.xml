@@ -137,6 +137,16 @@
 			follows="left|top"
 			layout="topleft" />
 
+		<check_box
+			name="ao_local"
+			label="Local"
+			tool_tip="When checked, selecting an animation plays it locally only (red highlight). Unchecking promotes the last local selection to in-world."
+			left_pad="4"
+			width="60"
+			height="16"
+			follows="left|top"
+			layout="topleft" />
+
 		<combo_box
 			name="ao_state_selection_combo"
 			tool_tip="Select animation state to edit."
