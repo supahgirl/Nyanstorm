@@ -1821,8 +1821,8 @@ configure_file(
     @ONLY
 )
 list(APPEND viewer_HEADER_FILES ${CMAKE_CURRENT_BINARY_DIR}/fsdiscordkey.h)
-LIST(APPEND viewer_HEADER_FILES fsfloaterdiscord.h fsdiscordconnect.h)
-LIST(APPEND viewer_SOURCE_FILES fsfloaterdiscord.cpp fsdiscordconnect.cpp)
+LIST(APPEND viewer_HEADER_FILES fsfloaterdiscord.h fsdiscordconnect.h fsdiscordgateway.h)
+LIST(APPEND viewer_SOURCE_FILES fsfloaterdiscord.cpp fsdiscordconnect.cpp fsdiscordgateway.cpp)
 #</FS:LO>
 
 # <FS:TS> Generate the version information header file.
