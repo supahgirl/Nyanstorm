@@ -46,6 +46,7 @@
 #include "fscorehttputil.h"
 #include "llsdjson.h"
 #include <boost/json.hpp>
+#include "fsdiscordgateway.h"
 #include <boost/bind/bind.hpp>
 #include <fstream>
 #include <string>
@@ -675,7 +676,13 @@ void startDiscordBridge()
 	static bool started = false;
 	if (!started)
 	{
+		// Start the internal C++ Discord Gateway (replaces discord_relay.py)
+		FSDiscordGateway::getInstance()->start();
+
 		gIdleCallbacks.addFunction(mcpIdleCallback, nullptr);
+		// The SSE listener thread connects to the internal HTTP server (port 3002)
+		// served by FSDiscordGateway, so the existing queue + mcpIdleCallback
+		// architecture continues to work unchanged.
 		std::thread(discordListenerThreadFunc).detach();
 		started = true;
 	}

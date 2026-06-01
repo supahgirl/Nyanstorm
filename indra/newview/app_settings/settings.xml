@@ -35,6 +35,17 @@
     <key>Value</key>
     <integer>32</integer>
   </map>
+  <key>FSDiscordBotToken</key>
+  <map>
+    <key>Comment</key>
+    <string>Discord bot token for the built-in Discord chat relay. Create a bot at https://discord.com/developers/applications</string>
+    <key>Persist</key>
+    <integer>1</integer>
+    <key>Type</key>
+    <string>String</string>
+    <key>Value</key>
+    <string></string>
+  </map>
   <key>FSLandmarkCreatedNotification</key>
   <map>
     <key>Comment</key>
