@@ -139,8 +139,8 @@
 
 		<check_box
 			name="ao_local"
-			label="Local"
-			tool_tip="When checked, selecting an animation plays it locally only (red highlight). Unchecking promotes the last local selection to in-world."
+			label="Preview"
+			tool_tip="When checked, selecting an animation previews it locally (red highlight). Unchecking promotes the last previewed animation to in-world."
 			left_pad="4"
 			width="60"
 			height="16"
