@@ -963,7 +963,7 @@ void FloaterAO::refreshItemStyling()
                 if (LLScrollListText* text = dynamic_cast<LLScrollListText*>(text_cell))
                 {
                     text->setFontStyle(LLFontGL::BOLD);
-                    text->setColor(local_active ? LLColor4::green : LLColor4::white);
+                    text->setColor(LLColor4::green);
                 }
             }
         }
