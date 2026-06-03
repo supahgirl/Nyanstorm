@@ -148,6 +148,8 @@
 #include "boost/unordered_map.hpp"
 #include <boost/regex.hpp>
 #include <boost/algorithm/string.hpp>
+#include <fstream>
+#include <sstream>
 #include <boost/json.hpp>
 #include "llcleanup.h"
 #include "llviewershadermgr.h"
@@ -188,6 +190,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include "fsfloaterimcontainer.h"
+#include "fschathistory.h"
 #include <boost/json.hpp>
 
 using namespace LLAvatarAppearanceDefines;
@@ -12714,6 +12717,63 @@ void discordUpdateStatusFromRelay(const std::string& status)
     sDiscordStatus = status;
 }
 
+// ── AI session helpers ────────────────────────────────────────────────────────
+
+static void saveAISessionFile(const std::vector<std::string>& filenames, std::string* json_ptr)
+{
+    if (filenames.empty() || !json_ptr) return;
+    std::ofstream out(filenames[0]);
+    if (out.is_open()) out << *json_ptr;
+    delete json_ptr;
+}
+
+static void loadAISessionFile(const std::vector<std::string>& filenames, LLUUID sid)
+{
+    if (filenames.empty()) return;
+    std::ifstream in(filenames[0]);
+    if (!in.is_open()) return;
+    std::stringstream buf; buf << in.rdbuf();
+    try
+    {
+        boost::json::value jv = boost::json::parse(buf.str());
+        if (!jv.is_object()) return;
+        boost::json::object root = jv.as_object();
+        if (root.contains("persona"))
+            FSFloaterAIConfig::sConfigs[sid].persona = std::string(root.at("persona").as_string());
+        if (root.contains("instructions"))
+            FSFloaterAIConfig::sConfigs[sid].instructions = std::string(root.at("instructions").as_string());
+        if (root.contains("messages") && root["messages"].is_array())
+        {
+            LLIMModel::LLIMSession* session = LLIMModel::instance().findIMSession(sid);
+            if (session)
+            {
+                session->mMsgs.clear();
+                session->mLastHistoryCacheMsgs.clear();
+                std::string agent_name = (sid == AI_AGENT_2_SESSION_ID) ? "AI Agent 2" : "AI Agent";
+                for (const auto& jm : root["messages"].as_array())
+                {
+                    if (!jm.is_object()) continue;
+                    boost::json::object obj = jm.as_object();
+                    std::string role    = std::string(obj.at("role").as_string());
+                    std::string content = std::string(obj.at("content").as_string());
+                    LLUUID from_id = (role == "user") ? gAgent.getID() : sid;
+                    std::string from = (role == "user") ? "" : agent_name;
+                    // Use addMessage (not silently) to trigger display updates
+                    LLIMModel::instance().addMessage(sid, from, from_id, content);
+                }
+            }
+        }
+        FSFloaterIM* floater = FSFloaterIM::findInstance(sid);
+        if (floater)
+        {
+            floater->resetLastChatMessageIndex();
+            floater->getChild<FSChatHistory>("chat_history")->clear();
+            floater->updateMessages();
+        }
+    }
+    catch (...) {}
+}
+
 void initialize_menus()
 {
     // A parameterized event handler used as ctrl-8/9/0 zoom controls below.
@@ -13434,16 +13494,75 @@ void initialize_menus()
     commit.add("AI.SessionSave", [](LLUICtrl*, const LLSD&) {
         LLUUID sid = FSFloaterAIConfig::sCurrentEditingSession;
         if (sid.isNull()) sid = AI_AGENT_SESSION_ID;
-        sendMCPRequest(sid, "/session export");
+        std::string name = (sid == AI_AGENT_2_SESSION_ID) ? "AI_Agent_2" : "AI_Agent";
+        if (sid == AI_AGENT_SESSION_ID && gSavedSettings.controlExists("FSAIAgentName1"))
+            name = gSavedSettings.getString("FSAIAgentName1");
+        else if (sid == AI_AGENT_2_SESSION_ID && gSavedSettings.controlExists("FSAIAgentName2"))
+            name = gSavedSettings.getString("FSAIAgentName2");
+        boost::json::object root;
+        auto it = FSFloaterAIConfig::sConfigs.find(sid);
+        if (it != FSFloaterAIConfig::sConfigs.end())
+        {
+            root["persona"]      = it->second.persona;
+            root["instructions"] = it->second.instructions;
+        }
+        boost::json::array msgs;
+        LLIMModel::LLIMSession* session = LLIMModel::instance().findIMSession(sid);
+        if (session)
+        {
+            // mMsgs is push_front'ed (newest first), iterate in reverse for chronological order
+            for (auto rit = session->mMsgs.rbegin(); rit != session->mMsgs.rend(); ++rit)
+            {
+                boost::json::object jm;
+                jm["role"]    = (rit->operator[]("from_id").asUUID() == gAgent.getID()) ? "user" : "assistant";
+                jm["content"] = rit->operator[]("message").asString();
+                msgs.push_back(std::move(jm));
+            }
+        }
+        root["messages"] = std::move(msgs);
+        std::string* json = new std::string(boost::json::serialize(root));
+        LLFilePickerReplyThread::startPicker(
+            boost::bind(saveAISessionFile, _1, json),
+            LLFilePicker::FFSAVE_ALL,
+            name + "_session.json");
     });
     commit.add("AI.SessionLoad", [](LLUICtrl*, const LLSD&) {
         LLUUID sid = FSFloaterAIConfig::sCurrentEditingSession;
         if (sid.isNull()) sid = AI_AGENT_SESSION_ID;
-        FSFloaterAIConfig::openSessionLoadPicker(sid);
+        LLFilePickerReplyThread::startPicker(
+            boost::bind(loadAISessionFile, _1, sid),
+            LLFilePicker::FFLOAD_ALL, false);
     });
     commit.add("AI.History", [](LLUICtrl*, const LLSD&) {
         LLUUID sid = FSFloaterAIConfig::sCurrentEditingSession;
         if (sid.isNull()) sid = AI_AGENT_SESSION_ID;
-        sendMCPRequest(sid, "/history json");
+        std::vector<std::pair<std::string, std::string>> history;
+        LLIMModel::LLIMSession* session = LLIMModel::instance().findIMSession(sid);
+        if (session)
+        {
+            // mMsgs is push_front'ed (newest first), iterate in reverse
+            for (auto rit = session->mMsgs.rbegin(); rit != session->mMsgs.rend(); ++rit)
+            {
+                std::string role = (rit->operator[]("from_id").asUUID() == gAgent.getID()) ? "user" : "assistant";
+                history.push_back({role, rit->operator[]("message").asString()});
+            }
+        }
+        aiCreateHistoryNotecard(sid, history);
+    });
+    commit.add("AI.ResetContext", [](LLUICtrl*, const LLSD&) {
+        LLUUID sid = FSFloaterAIConfig::sCurrentEditingSession;
+        if (sid.isNull()) sid = AI_AGENT_SESSION_ID;
+        LLIMModel::LLIMSession* session = LLIMModel::instance().findIMSession(sid);
+        if (session)
+        {
+            session->mMsgs.clear();
+            session->mLastHistoryCacheMsgs.clear();
+        }
+        FSFloaterIM* floater = FSFloaterIM::findInstance(sid);
+        if (floater)
+        {
+            floater->resetLastChatMessageIndex();
+            floater->getChild<FSChatHistory>("chat_history")->clear();
+        }
     });
 }

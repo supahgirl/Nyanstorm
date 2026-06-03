@@ -36,8 +36,14 @@
 #include "llslurl.h"
 #include "llurlaction.h"
 #include "llviewercontrol.h"
+#include "fsfloaterimcontainer.h" // for AI_AGENT_SESSION_ID
 
 FSContactsFriendsMenu gFSContactsFriendsMenu;
+
+static bool isAIAgentUUID(const LLUUID& id)
+{
+    return (id == AI_AGENT_SESSION_ID || id == AI_AGENT_2_SESSION_ID);
+}
 
 LLContextMenu* FSContactsFriendsMenu::createMenu()
 {
@@ -87,6 +93,17 @@ LLContextMenu* FSContactsFriendsMenu::createMenu()
 bool FSContactsFriendsMenu::enableContextMenuItem(const LLSD& userdata)
 {
     std::string item = userdata.asString();
+
+    // Disable all avatar-specific items for AI agent fake users
+    if (mUUIDs.size() == 1 && isAIAgentUUID(mUUIDs.front()))
+    {
+        // AI agents: only allow IM, chat history, copy name, options
+        if (item == "send_im") return true;
+        if (item == "can_callog") return true;
+        if (item == "copy_label") return true;
+        if (item.find("FSFriend") == 0) return true; // column options
+        return false;
+    }
 
     if (item == "remove_friend")
     {

@@ -47,7 +47,9 @@
 #include "llsdjson.h"
 #include <boost/json.hpp>
 #include "fsdiscordgateway.h"
+#include "llllmnetworkmanager.h"
 #include <boost/bind/bind.hpp>
+#include <deque>
 #include <fstream>
 #include <string>
 #include "llappviewer.h"
@@ -373,7 +375,7 @@ static void mcpIdleCallback(void* userdata)
 	}
 }
 
-static void queueMCPEvent(const LLUUID& session_id, const std::string& token, bool done)
+void queueMCPEvent(const LLUUID& session_id, const std::string& token, bool done)
 {
 	std::lock_guard<std::mutex> lock(sMCPMutex);
 	sMCPEvents.push_back(LLSD().with("session_id", session_id.asString()).with("token", token).with("done", done));
@@ -568,109 +570,6 @@ static void sendDiscordTyping(const LLUUID& session_uuid, bool typing)
 	}).detach();
 }
 
-// Context passed into the streaming thread
-struct MCPStreamContext
-{
-	LLUUID      session_id;
-	std::string prompt;
-};
-
-static void mcpStreamThreadFunc(MCPStreamContext ctx)
-{
-	// Build JSON body
-	boost::json::object body;
-	body["prompt"]     = ctx.prompt;
-	body["session_id"] = ctx.session_id.asString();
-	std::string json_body = boost::json::serialize(body);
-
-	// Open TCP socket to port 3001
-	int sock = ::socket(AF_INET, SOCK_STREAM, 0);
-	if (sock < 0)
-	{
-		queueMCPEvent(ctx.session_id, "[ERROR] socket() failed", false);
-		queueMCPEvent(ctx.session_id, "", true);
-		return;
-	}
-
-	struct sockaddr_in addr;
-	addr.sin_family = AF_INET;
-	addr.sin_port   = htons(MCP_STREAM_PORT);
-	::inet_pton(AF_INET, MCP_STREAM_HOST.c_str(), &addr.sin_addr);
-
-	if (::connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0)
-	{
-		::close(sock);
-		queueMCPEvent(ctx.session_id, "[ERROR] MCP streaming server not reachable on port 3000", false);
-		queueMCPEvent(ctx.session_id, "", true);
-		return;
-	}
-
-	// Build HTTP/1.1 POST request
-	std::string request =
-		"POST /stream HTTP/1.1\r\n"
-		"Host: 127.0.0.1:3000\r\n"
-		"Content-Type: application/json\r\n"
-		"Connection: close\r\n"
-		"Content-Length: " + std::to_string(json_body.size()) + "\r\n"
-		"\r\n" + json_body;
-
-	::send(sock, request.c_str(), request.size(), 0);
-
-	// Read response line by line and parse SSE
-	std::string line_buf;
-	bool in_headers = true;
-	bool chunked    = false;
-	char ch;
-
-	while (::recv(sock, &ch, 1, 0) == 1)
-	{
-		if (ch != '\n')
-		{
-			if (ch != '\r') line_buf += ch;
-			continue;
-		}
-
-		std::string line = line_buf;
-		line_buf.clear();
-
-		if (in_headers)
-		{
-			if (line.empty()) in_headers = false;
-			else if (line.find("Transfer-Encoding: chunked") != std::string::npos) chunked = true;
-			continue;
-		}
-
-		if (chunked)
-		{
-			bool looks_like_size = !line.empty() && line.find_first_not_of("0123456789abcdefABCDEF") == std::string::npos;
-			if (looks_like_size) continue;
-		}
-
-		if (line.rfind("data: ", 0) != 0) continue;
-
-		std::string payload = line.substr(6);
-
-		if (payload == "[DONE]") break;
-
-		try
-		{
-			boost::json::value val = boost::json::parse(payload);
-			if (val.is_object() && val.as_object().contains("token"))
-			{
-				std::string token = val.as_object()["token"].as_string().c_str();
-				if (!token.empty())
-				{
-					queueMCPEvent(ctx.session_id, token, false);
-				}
-			}
-		}
-		catch (...) {}
-	}
-
-	::close(sock);
-	queueMCPEvent(ctx.session_id, "", true);
-}
-
 void startDiscordBridge()
 {
 	static bool started = false;
@@ -686,22 +585,6 @@ void startDiscordBridge()
 		std::thread(discordListenerThreadFunc).detach();
 		started = true;
 	}
-}
-
-static void sendMCPStreamRequest(const LLUUID& session_id, const std::string& prompt)
-{
-	static bool registered = false;
-	if (!registered)
-	{
-		// Discord bridge already started from postBuild; just ensure idle callback is registered
-		startDiscordBridge();
-		registered = true;
-	}
-
-	MCPStreamContext ctx;
-	ctx.session_id = session_id;
-	ctx.prompt     = prompt;
-	std::thread(mcpStreamThreadFunc, ctx).detach();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1689,8 +1572,114 @@ void FSFloaterIM::sendMsg(const std::string& msg)
 		}
 		else
 		{
-			processIMTyping(mSessionID, true);
-			sendMCPStreamRequest(mSessionID, utf8_text);
+			// ── Native C++ LLM path ─────────────────────────────────────
+			// 1. Get the config of the first model marked "current"
+			std::string llm_endpoint, llm_apikey, llm_model;
+			AIModelConfig cur_cfg;
+			auto all_cfgs = FSFloaterAIModelConfig::loadConfigs();
+			for (const auto& cfg : all_cfgs)
+			{
+				if (cfg.is_current) { cur_cfg = cfg; break; }
+			}
+			if (cur_cfg.id.empty())
+			{
+				LL_WARNS("AI_Agent") << "No LLM model configured (Configure > LLM > Apply)." << LL_ENDL;
+				return;
+			}
+			llm_endpoint = cur_cfg.endpoint;
+			llm_apikey   = cur_cfg.apikey;
+			llm_model    = cur_cfg.model;
+
+			// 2. System prompt (persona + instructions)
+			auto it_cfg = FSFloaterAIConfig::sConfigs.find(mSessionID);
+			std::string persona, instructions;
+			if (it_cfg != FSFloaterAIConfig::sConfigs.end())
+			{
+				persona      = it_cfg->second.persona;
+				instructions = it_cfg->second.instructions;
+			}
+			std::string system_prompt;
+			if (!persona.empty())
+				system_prompt = persona;
+			if (!instructions.empty())
+			{
+				if (!system_prompt.empty()) system_prompt += "\n\n";
+				system_prompt += instructions;
+			}
+
+			// 3. Payload OpenAI
+			const size_t MAX_HISTORY_CHARS = (cur_cfg.context_length > 0)
+				? (size_t)cur_cfg.context_length : 12000;
+
+			LLSD payload;
+			payload["model"] = llm_model;
+
+			// System prompt — ALWAYS added
+			{
+				LLSD sys_msg;
+				sys_msg["role"]    = "system";
+				sys_msg["content"] = system_prompt;
+				payload["messages"][0] = sys_msg;
+			}
+
+			// Build current user message first (to compute its char cost)
+			std::string user_content = utf8_text;
+			size_t user_msg_size = user_content.size();
+
+			// 4. Chat history — sliding window by character count
+			//    Stay within MAX_HISTORY_CHARS budget (excluding system prompt).
+			//    Iterate in REVERSE (newest first), collect qualifying messages
+			//    in a deque with push_front so final order is chronological.
+			size_t budget = MAX_HISTORY_CHARS;
+			std::deque<LLSD> history_window;
+			LLIMModel::LLIMSession* im_session = LLIMModel::instance().findIMSession(mSessionID);
+			if (im_session)
+			{
+				// Iterate from newest to oldest (list is newest-first)
+				for (LLIMModel::chat_message_list_t::reverse_iterator rit =
+					 im_session->mMsgs.rbegin();
+					 rit != im_session->mMsgs.rend(); ++rit)
+				{
+					LLSD m = *rit;
+					std::string text = m["message"].asString();
+					if (text.size() > budget) break; // single msg too big
+
+					LLSD hist_msg;
+					hist_msg["role"] = (m["from_id"].asUUID() == gAgent.getID())
+						? "user" : "assistant";
+					hist_msg["content"] = text;
+
+					budget -= text.size();
+					history_window.push_front(hist_msg); // keep oldest first
+				}
+			}
+
+			// Append history to payload (already in chronological order)
+			for (const auto& hist_msg : history_window)
+			{
+				S32 idx = (S32)payload["messages"].size();
+				payload["messages"][idx] = hist_msg;
+			}
+
+			// 5. Current user message — ALWAYS added
+			LLSD user_msg;
+			user_msg["role"]    = "user";
+			user_msg["content"] = user_content;
+			{
+				S32 idx = (S32)payload["messages"].size();
+				payload["messages"][idx] = user_msg;
+			}
+
+			// 6. Streaming
+			bool is_openrouter = (cur_cfg.type == "openrouter");
+			std::string agent_name;
+			if (mSessionID == AI_AGENT_2_SESSION_ID)
+				agent_name = gSavedSettings.getString("FSAIAgentName2");
+			else
+				agent_name = gSavedSettings.getString("FSAIAgentName1");
+			FSLLMNetworkManager::getInstance()->sendStreamRequest(
+				llm_endpoint, llm_apikey, is_openrouter, payload,
+				mSessionID, agent_name);
 		}
 		return;
 	}
@@ -1988,7 +1977,29 @@ bool FSFloaterIM::postBuild()
     mSysinfoButton = getChild<LLButton>("send_sysinfo_btn");
     onSysinfoButtonVisibilityChanged(false);
 
-    // type-specfic controls
+    // Hide all avatar-specific buttons for AI agent sessions
+    // (these are not real avatars — no profile, friend, teleport, pay, share, etc.)
+    if (mSessionID == AI_AGENT_SESSION_ID || mSessionID == AI_AGENT_2_SESSION_ID)
+    {
+        getChild<LLLayoutPanel>("profile_panel")->setVisible(false);
+        getChild<LLLayoutPanel>("gprofile_panel")->setVisible(false);
+        getChild<LLLayoutPanel>("friend_panel")->setVisible(false);
+        getChild<LLLayoutPanel>("tp_panel")->setVisible(false);
+        getChild<LLLayoutPanel>("share_panel")->setVisible(false);
+        getChild<LLLayoutPanel>("pay_panel")->setVisible(false);
+        getChild<LLLayoutPanel>("add_participant_panel")->setVisible(false);
+        getChild<LLLayoutPanel>("end_call_btn_panel")->setVisible(false);
+        getChild<LLLayoutPanel>("voice_ctrls_btn_panel")->setVisible(false);
+        getChild<LLLayoutPanel>("slide_panel")->setVisible(false);
+        getChild<LLLayoutPanel>("call_btn_panel")->setVisible(false);
+        // Also disable the agent selector button (→) — fake agents don't redirect
+        // Hide the participant control panel entirely (Profile, Teleport, IM, etc.)
+        mControlPanel->getParent()->setVisible(false);
+        // Also disable the agent selector button (→)
+        getChild<LLButton>("agent_menu_btn")->setEnabled(false);
+    }
+
+    // type-specific controls
     LLIMModel::LLIMSession* pIMSession = LLIMModel::instance().findIMSession(mSessionID);
     if (pIMSession)
     {
@@ -2316,6 +2327,17 @@ bool FSFloaterIM::onMCPToken(const LLSD& data)
             LLIMModel::instance().addMessage(mSessionID, "AI Agent",
                                             LLUUID::null, mStreamingBuffer);
             updateMessages();
+        }
+        // Store the complete response in mMsgs so Save/Restore work correctly
+        if (!mStreamingBuffer.empty())
+        {
+            LLIMModel::LLIMSession* session = LLIMModel::instance().findIMSession(mSessionID);
+            if (session && !session->mMsgs.empty())
+            {
+                // Replace the initial space bubble with the full response text
+                LLSD& last_msg = session->mMsgs.front();
+                last_msg["message"] = mStreamingBuffer;
+            }
         }
         mStreamingBuffer.clear();
         mStreamingActive = false;

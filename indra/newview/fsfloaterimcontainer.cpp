@@ -1266,6 +1266,271 @@ void FSFloaterAIModelList::onQuitClicked()
     closeFloater();
 }
 
+// ── FSFloaterAIModelConfig ─────────────────────────────────────────────────────
+
+static const char*  kModelConfigSetting = "FSModelProviderConfigs";
+
+FSFloaterAIModelConfig::FSFloaterAIModelConfig(const LLSD& key)
+    : LLFloater(key)
+{
+}
+
+bool FSFloaterAIModelConfig::postBuild()
+{
+    getChild<LLUICtrl>("model_config_list")->setCommitCallback(
+        boost::bind(&FSFloaterAIModelConfig::onSelectionChanged, this));
+
+    getChild<LLButton>("mc_add_btn")->setCommitCallback(
+        boost::bind(&FSFloaterAIModelConfig::onAdd, this));
+    getChild<LLButton>("mc_trash_btn")->setCommitCallback(
+        boost::bind(&FSFloaterAIModelConfig::onTrash, this));
+    getChild<LLButton>("mc_apply_btn")->setCommitCallback(
+        boost::bind(&FSFloaterAIModelConfig::onApply, this));
+    getChild<LLButton>("mc_save_btn")->setCommitCallback(
+        boost::bind(&FSFloaterAIModelConfig::onSave, this));
+    getChild<LLUICtrl>("llm_type")->setCommitCallback(
+        boost::bind(&FSFloaterAIModelConfig::onTypeChanged, this));
+
+    getChild<LLButton>("mc_close_btn")->setCommitCallback(
+        boost::bind(&FSFloaterAIModelConfig::onCloseClicked, this));
+
+    return LLFloater::postBuild();
+}
+
+void FSFloaterAIModelConfig::onOpen(const LLSD& key)
+{
+    LLFloater::onOpen(key);
+    mConfigs = loadConfigs();
+    renderList();
+}
+
+// ── Render the scroll list from mConfigs ──────────────────────────────────────
+
+void FSFloaterAIModelConfig::renderList()
+{
+    LLScrollListCtrl* list = getChild<LLScrollListCtrl>("model_config_list");
+    list->clearRows();
+
+    for (const auto& cfg : mConfigs)
+    {
+        std::string style = cfg.is_current ? "BOLD" : "NORMAL";
+        LLSD row;
+        row["columns"][0]["column"]     = "mc_col_active";
+        row["columns"][0]["value"]      = cfg.is_current ? "\xe2\x97\x8f" : "";
+        row["columns"][0]["font-style"] = style;
+        row["columns"][1]["column"]     = "mc_col_type";
+        row["columns"][1]["value"]      = cfg.type;
+        row["columns"][1]["font-style"] = style;
+        row["columns"][2]["column"]     = "mc_col_model";
+        row["columns"][2]["value"]      = cfg.model;
+        row["columns"][2]["font-style"] = style;
+        row["columns"][3]["column"]     = "mc_col_endpoint";
+        row["columns"][3]["value"]      = cfg.endpoint;
+        row["columns"][3]["font-style"] = style;
+        row["value"] = cfg.id;
+        list->addElement(row);
+    }
+}
+
+// ── Selection changed: populate edit fields from selected config ─────────────
+
+void FSFloaterAIModelConfig::onSelectionChanged()
+{
+    LLScrollListCtrl* list = getChild<LLScrollListCtrl>("model_config_list");
+    LLScrollListItem* item = list->getFirstSelected();
+    if (!item) return;
+
+    std::string sel_id = item->getValue().asString();
+    for (const auto& cfg : mConfigs)
+    {
+        if (cfg.id == sel_id)
+        {
+            getChild<LLUICtrl>("llm_type")->setValue(LLSD(cfg.type));
+            getChild<LLUICtrl>("llm_model")->setValue(LLSD(cfg.model));
+            getChild<LLUICtrl>("llm_endpoint")->setValue(LLSD(cfg.endpoint));
+            getChild<LLUICtrl>("llm_apikey")->setValue(LLSD(cfg.apikey));
+            getChild<LLUICtrl>("llm_context_length")->setValue(LLSD((F32)cfg.context_length));
+            setEndpointAndApiKey(cfg.type);
+            break;
+        }
+    }
+}
+
+// ── Add new model configuration ──────────────────────────────────────────────
+
+void FSFloaterAIModelConfig::onAdd()
+{
+    std::string type = getChild<LLUICtrl>("llm_type")->getValue().asString();
+    if (type.empty()) return;
+
+    AIModelConfig cfg;
+    cfg.id            = LLUUID::generateNewID().asString();
+    cfg.type          = type;
+    cfg.model         = getChild<LLUICtrl>("llm_model")->getValue().asString();
+    cfg.endpoint      = getChild<LLUICtrl>("llm_endpoint")->getValue().asString();
+    cfg.apikey        = getChild<LLUICtrl>("llm_apikey")->getValue().asString();
+    cfg.context_length = (S32)getChild<LLUICtrl>("llm_context_length")->getValue().asReal();
+
+    mConfigs.push_back(cfg);
+    persistConfigs();
+    renderList();
+}
+
+// ── Remove selected model configuration ──────────────────────────────────────
+
+void FSFloaterAIModelConfig::onTrash()
+{
+    LLScrollListCtrl* list = getChild<LLScrollListCtrl>("model_config_list");
+    LLScrollListItem* item = list->getFirstSelected();
+    if (!item) return;
+
+    std::string sel_id = item->getValue().asString();
+    for (auto it = mConfigs.begin(); it != mConfigs.end(); ++it)
+    {
+        if (it->id == sel_id)
+        {
+            mConfigs.erase(it);
+            persistConfigs();
+            renderList();
+            return;
+        }
+    }
+}
+
+// ── Apply: save edits + mark selected config as current ───────────────────────
+
+void FSFloaterAIModelConfig::onApply()
+{
+    // First save current field edits (same as onSave)
+    saveCurrentEdits();
+
+    // Then mark selected config as current
+    LLScrollListCtrl* list = getChild<LLScrollListCtrl>("model_config_list");
+    LLScrollListItem* item = list->getFirstSelected();
+    if (!item) return;
+
+    std::string sel_id = item->getValue().asString();
+    for (auto& cfg : mConfigs)
+        cfg.is_current = (cfg.id == sel_id);
+
+    persistConfigs();
+    renderList();
+}
+
+// ── Shared helper: copy field values into the selected config ───────────────
+
+void FSFloaterAIModelConfig::saveCurrentEdits()
+{
+    LLScrollListCtrl* list = getChild<LLScrollListCtrl>("model_config_list");
+    LLScrollListItem* item = list->getFirstSelected();
+    if (!item) return;
+
+    std::string sel_id = item->getValue().asString();
+    for (auto& cfg : mConfigs)
+    {
+        if (cfg.id == sel_id)
+        {
+            cfg.type          = getChild<LLUICtrl>("llm_type")->getValue().asString();
+            cfg.model         = getChild<LLUICtrl>("llm_model")->getValue().asString();
+            cfg.endpoint      = getChild<LLUICtrl>("llm_endpoint")->getValue().asString();
+            cfg.apikey        = getChild<LLUICtrl>("llm_apikey")->getValue().asString();
+            cfg.context_length = (S32)getChild<LLUICtrl>("llm_context_length")->getValue().asReal();
+            break;
+        }
+    }
+}
+
+// ── Save: persist edits (without changing current marker) ────────────────────
+
+void FSFloaterAIModelConfig::onSave()
+{
+    saveCurrentEdits();
+    persistConfigs();
+    renderList();
+}
+
+// ── Dynamic endpoint / API key behavior ───────────────────────────────────────
+
+void FSFloaterAIModelConfig::onTypeChanged()
+{
+    std::string type = getChild<LLUICtrl>("llm_type")->getValue().asString();
+    setEndpointAndApiKey(type);
+}
+
+void FSFloaterAIModelConfig::setEndpointAndApiKey(const std::string& type)
+{
+    LLLineEditor* endpoint = getChild<LLLineEditor>("llm_endpoint");
+    LLLineEditor* apikey   = getChild<LLLineEditor>("llm_apikey");
+
+    if (type == "ollama")
+    {
+        endpoint->setValue(LLSD("http://localhost:11434/api/chat"));
+        apikey->setValue(LLSD(""));
+        apikey->setEnabled(false);
+    }
+    else if (type == "openrouter")
+    {
+        endpoint->setValue(LLSD("https://openrouter.ai/api/v1/chat/completions"));
+        apikey->setEnabled(true);
+    }
+    else if (type == "llamacpp")
+    {
+        endpoint->setValue(LLSD("http://localhost:8080/v1/chat/completions"));
+        apikey->setValue(LLSD(""));
+        apikey->setEnabled(false);
+    }
+    else if (type == "custom")
+    {
+        apikey->setEnabled(true);
+    }
+}
+
+void FSFloaterAIModelConfig::onCloseClicked()
+{
+    closeFloater();
+}
+
+// ── Static persistence helpers ───────────────────────────────────────────────
+
+void FSFloaterAIModelConfig::persistConfigs()
+{
+    LLSD list;
+    for (const auto& cfg : mConfigs)
+    {
+        LLSD entry;
+        entry["id"]            = cfg.id;
+        entry["type"]          = cfg.type;
+        entry["model"]         = cfg.model;
+        entry["endpoint"]      = cfg.endpoint;
+        entry["apikey"]        = cfg.apikey;
+        entry["context_length"] = (int)cfg.context_length;
+        entry["is_current"]     = (bool)cfg.is_current;
+        list.append(entry);
+    }
+    gSavedSettings.setLLSD(kModelConfigSetting, list);
+}
+
+/*static*/
+std::vector<AIModelConfig> FSFloaterAIModelConfig::loadConfigs()
+{
+    std::vector<AIModelConfig> result;
+    LLSD list = gSavedSettings.getLLSD(kModelConfigSetting);
+    for (LLSD::array_const_iterator it = list.beginArray(); it != list.endArray(); ++it)
+    {
+        AIModelConfig cfg;
+        cfg.id            = (*it)["id"].asString();
+        cfg.type          = (*it)["type"].asString();
+        cfg.model         = (*it)["model"].asString();
+        cfg.endpoint      = (*it)["endpoint"].asString();
+        cfg.apikey        = (*it)["apikey"].asString();
+        cfg.context_length = (*it)["context_length"].asInteger();
+        if (cfg.context_length <= 0) cfg.context_length = 12000;
+        cfg.is_current     = (*it)["is_current"].asBoolean();
+        result.push_back(cfg);
+    }
+    return result;
+}
+
 // ── FSFloaterDiscordContacts ──────────────────────────────────────────────────
 
 static const int    DISCORD_CONTACTS_PORT = 3002;
@@ -1699,7 +1964,7 @@ void FSFloaterAIConfig::onSaveFileSelected(const std::vector<std::string>& filen
     std::string selected = filenames[0];
     std::string output_path = selected;
 
-    // Extract the filename (without extension) to synchronize cfg.name
+    // Extract file name (without extension) to sync cfg.name
     size_t last_slash = selected.find_last_of("/\\");
     size_t last_dot = selected.find_last_of(".");
     std::string name_without_ext;
