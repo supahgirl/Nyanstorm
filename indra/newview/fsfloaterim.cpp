@@ -1977,9 +1977,10 @@ bool FSFloaterIM::postBuild()
     mSysinfoButton = getChild<LLButton>("send_sysinfo_btn");
     onSysinfoButtonVisibilityChanged(false);
 
-    // Hide all avatar-specific buttons for AI agent sessions
+    // Hide all avatar-specific buttons for AI agent and Discord sessions
     // (these are not real avatars — no profile, friend, teleport, pay, share, etc.)
-    if (mSessionID == AI_AGENT_SESSION_ID || mSessionID == AI_AGENT_2_SESSION_ID)
+    if (mSessionID == AI_AGENT_SESSION_ID || mSessionID == AI_AGENT_2_SESSION_ID
+        || isDiscordSession(mSessionID))
     {
         getChild<LLLayoutPanel>("profile_panel")->setVisible(false);
         getChild<LLLayoutPanel>("gprofile_panel")->setVisible(false);
