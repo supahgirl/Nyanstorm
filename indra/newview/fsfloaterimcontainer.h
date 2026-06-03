@@ -282,4 +282,45 @@ private:
     static std::string sPendingSessionJSON;
 };
 
+// ── AI Model Configuration ────────────────────────────────────────────────────
+
+struct AIModelConfig
+{
+    std::string id;          // unique identifier (UUID string)
+    std::string type;        // "ollama", "llamacpp", "openrouter", "custom"
+    std::string model;       // model name (e.g. "llama3")
+    std::string endpoint;    // API endpoint URL
+    std::string apikey;      // API key for providers that need it
+    int         context_length = 12000; // max chars for chat history window
+    bool        is_current = false;     // dot indicator
+};
+
+class FSFloaterAIModelConfig : public LLFloater
+{
+public:
+    FSFloaterAIModelConfig(const LLSD& key);
+    bool postBuild() override;
+    void onOpen(const LLSD& key) override;
+
+    /// Save current configs to settings, called after any mutation
+    void persistConfigs();
+    /// Load configs from settings
+    static std::vector<AIModelConfig> loadConfigs();
+
+private:
+    void renderList();
+    void onSelectionChanged();
+    void onTypeChanged();
+    void onAdd();
+    void onTrash();
+    void onApply();
+    void onSave();
+    void onCloseClicked();
+    void saveCurrentEdits();
+
+    void setEndpointAndApiKey(const std::string& type);
+
+    std::vector<AIModelConfig> mConfigs;
+};
+
 #endif // FS_FLOATERIMCONTAINER_H

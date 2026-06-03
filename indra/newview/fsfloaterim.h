@@ -154,6 +154,7 @@ public:
     static floater_showed_signal_t sIMFloaterShowedSignal;
 
     S32 getLastChatMessageIndex() {return mLastMessageIndex;}
+    void resetLastChatMessageIndex() { mLastMessageIndex = -1; }
 
     LLVoiceChannel* getVoiceChannel() { return mVoiceChannel; }
 

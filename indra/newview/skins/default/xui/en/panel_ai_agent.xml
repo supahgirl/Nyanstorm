@@ -492,6 +492,8 @@
        name="agent_menu_btn"/>
     </layout_panel>
 
+<!-- test_native_llm checkbox removed — native LLM is now the default -->
+
   <!-- Checkbox for FS prefix on support groups -->
     <layout_panel
       name="support_panel"

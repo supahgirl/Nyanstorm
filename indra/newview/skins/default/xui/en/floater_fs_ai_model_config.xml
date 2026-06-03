@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<floater
+  positioning="cascading"
+  can_close="true"
+  can_resize="true"
+  layout="topleft"
+  name="fs_ai_model_config"
+  save_rect="true"
+  single_instance="true"
+  reuse_instance="true"
+  title="Model Configurations"
+  height="580"
+  width="620"
+  min_width="480"
+  min_height="510">
+
+  <!-- ── Model list (4 columns: current dot, type, model name, URL) ─────── -->
+  <scroll_list
+    name="model_config_list"
+    layout="topleft"
+    follows="all"
+    left="10" top="10" right="-10" bottom="-350"
+    draw_heading="true"
+    multi_select="false"
+    column_padding="4">
+
+    <column name="mc_col_active"   label=""                 width="24"/>
+    <column name="mc_col_type"     label="Provider"         width="80"/>
+    <column name="mc_col_model"    label="Model Name"       dynamicwidth="true"/>
+    <column name="mc_col_endpoint" label="Endpoint"         width="180"/>
+  </scroll_list>
+
+  <!-- ── Add / Remove buttons ───────────────────────────────────────────── -->
+  <button
+    layout="topleft"
+    follows="bottom|left"
+    height="24" width="24"
+    left="10" bottom="-318"
+    image_overlay="AddItem_Press"
+    name="mc_add_btn"/>
+
+  <button
+    layout="topleft"
+    follows="bottom|left"
+    height="24" width="24"
+    left="38" bottom="-318"
+    image_overlay="TrashItem_Press"
+    name="mc_trash_btn"/>
+
+  <button
+    layout="topleft"
+    follows="bottom|left"
+    font="SansSerifSmall"
+    height="24" width="60"
+    left="70" bottom="-318"
+    label="Apply"
+    name="mc_apply_btn"/>
+
+  <!-- ── Provider type (below +/trash buttons) ──────────────────────────── -->
+  <text
+    layout="topleft"
+    follows="bottom|left"
+    font="SansSerifSmall"
+    height="16" width="70"
+    left="10" top="340"
+    name="mc_type_label">Provider:</text>
+
+  <combo_box
+    layout="topleft"
+    follows="bottom|left|right"
+    height="22" width="200"
+    left="85" right="-10"
+    top="338"
+    label="Select provider&#x2026;"
+    name="llm_type"
+    allow_text_entry="false">
+    <combo_item name="ollama">ollama</combo_item>
+    <combo_item name="llamacpp">llamacpp</combo_item>
+    <combo_item name="openrouter">openrouter</combo_item>
+    <combo_item name="custom">custom</combo_item>
+  </combo_box>
+
+  <!-- ── Model name ─────────────────────────────────────────────────────── -->
+  <text
+    layout="topleft"
+    follows="bottom|left"
+    font="SansSerifSmall"
+    height="16" width="70"
+    left="10" top="372"
+    name="mc_model_label">Model:</text>
+
+  <line_editor
+    layout="topleft"
+    follows="bottom|left|right"
+    height="22" width="200"
+    left="85" right="-10"
+    top="370"
+    label="Model name (ex: llama3)"
+    name="llm_model"/>
+
+  <!-- ── Endpoint URL ───────────────────────────────────────────────────── -->
+  <text
+    layout="topleft"
+    follows="bottom|left"
+    font="SansSerifSmall"
+    height="16" width="70"
+    left="10" top="404"
+    name="mc_endpoint_label">Endpoint:</text>
+
+  <line_editor
+    layout="topleft"
+    follows="bottom|left|right"
+    height="22" width="200"
+    left="85" right="-10"
+    top="402"
+    label="API URL"
+    name="llm_endpoint"/>
+
+  <!-- ── API Key ────────────────────────────────────────────────────────── -->
+  <text
+    layout="topleft"
+    follows="bottom|left"
+    font="SansSerifSmall"
+    height="16" width="70"
+    left="10" top="436"
+    name="mc_apikey_label">API Key:</text>
+
+  <line_editor
+    layout="topleft"
+    follows="bottom|left|right"
+    height="22" width="200"
+    left="85" right="-10"
+    top="434"
+    label="API Key (optional)"
+    is_password="true"
+    name="llm_apikey"/>
+
+  <!-- ── Context Length (max chars for history) ──────────────────────────── -->
+  <text
+    layout="topleft"
+    follows="bottom|left"
+    font="SansSerifSmall"
+    height="16" width="70"
+    left="10" top="468"
+    name="mc_context_label">Max chars:</text>
+
+  <spinner
+    layout="topleft"
+    follows="bottom|left"
+    height="22" width="90"
+    left="85"
+    top="466"
+    label=""
+    name="llm_context_length"
+    min_val="1000" max_val="100000" increment="100"
+    decimal_digits="0"/>
+
+
+
+  <!-- ── Save / Close ───────────────────────────────────────────────────── -->
+  <button
+    layout="topleft"
+    follows="bottom|left"
+    font="SansSerifSmall"
+    height="24" width="80"
+    left="10" bottom="-8"
+    label="Save"
+    name="mc_save_btn"/>
+
+  <button
+    layout="topleft"
+    follows="bottom|right"
+    font="SansSerifSmall"
+    height="24" width="80"
+    right="-10" bottom="-8"
+    label="Close"
+    name="mc_close_btn"/>
+
+</floater>

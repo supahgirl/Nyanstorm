@@ -390,6 +390,11 @@ FSFloaterContacts* FSFloaterContacts::getInstance()
 // Friend actions
 //
 
+static bool isAIAgentUUID(const LLUUID& id)
+{
+    return (id == AI_AGENT_SESSION_ID || id == AI_AGENT_2_SESSION_ID);
+}
+
 void FSFloaterContacts::onImButtonClicked()
 {
     uuid_vec_t selected_uuids;
@@ -409,6 +414,7 @@ void FSFloaterContacts::onImButtonClicked()
 void FSFloaterContacts::onViewProfileButtonClicked()
 {
     LLUUID id = getCurrentItemID();
+    if (isAIAgentUUID(id)) return;
     LLAvatarActions::showProfile(id);
 }
 
@@ -416,6 +422,8 @@ void FSFloaterContacts::onTeleportButtonClicked()
 {
     uuid_vec_t selected_uuids;
     getCurrentItemIDs(selected_uuids);
+    for (const auto& id : selected_uuids)
+        if (isAIAgentUUID(id)) return;
     LLAvatarActions::offerTeleport(selected_uuids);
 }
 
@@ -423,6 +431,7 @@ void FSFloaterContacts::onPayButtonClicked()
 {
     if (LLUUID id = getCurrentItemID(); id.notNull())
     {
+        if (isAIAgentUUID(id)) return;
         LLAvatarActions::pay(id);
     }
 }
@@ -431,6 +440,8 @@ void FSFloaterContacts::onDeleteFriendButtonClicked()
 {
     uuid_vec_t selected_uuids;
     getCurrentItemIDs(selected_uuids);
+    for (const auto& id : selected_uuids)
+        if (isAIAgentUUID(id)) return;
 
     if (selected_uuids.size() == 1)
     {
@@ -783,6 +794,7 @@ void FSFloaterContacts::onMapButtonClicked()
 {
     if (LLUUID current_id = getCurrentItemID(); current_id.notNull() && is_agent_mappable(current_id))
     {
+        if (isAIAgentUUID(current_id)) return;
         LLAvatarActions::showOnMap(current_id);
     }
 }
@@ -983,6 +995,18 @@ void FSFloaterContacts::onSelectName()
     refreshUI();
     // check to see if rights have changed
     applyRightsToFriends();
+
+    // Disable buttons if the selected friend is an AI agent (fake user)
+    uuid_vec_t selected_uuids;
+    getCurrentItemIDs(selected_uuids);
+    bool is_ai = (selected_uuids.size() == 1 && isAIAgentUUID(selected_uuids[0]));
+    // IM button stays active — AI agents can be IM'd
+    mFriendsProfileBtn->setEnabled(!is_ai);
+    mFriendsTpBtn->setEnabled(!is_ai);
+    mFriendsMapBtn->setEnabled(!is_ai);
+    mFriendsPayBtn->setEnabled(!is_ai);
+    mFriendsRemoveBtn->setEnabled(!is_ai);
+    // Keep Add always enabled (it opens a picker, doesn't depend on selection)
 }
 
 void FSFloaterContacts::confirmModifyRights(const rights_map_t& ids, EGrantRevoke command)

@@ -8,6 +8,9 @@
      name="show_agent">
         <menu_item_call.on_click
          function="Contacts.Friends.ShowProfile"/>
+        <menu_item_call.on_enable
+         function="Contacts.Friends.EnableItem"
+         parameter="show_profile"/>
     </menu_item_call>
     <menu_item_call
      label="Send IM..."
@@ -32,6 +35,9 @@
      name="Add to Set">
         <menu_item_call.on_click
          function="Contacts.Friends.AddToContactSet"/>
+        <menu_item_call.on_enable
+         function="Contacts.Friends.EnableItem"
+         parameter="add_to_set"/>
     </menu_item_call>
     <menu_item_call
      label="Zoom at Friend"
@@ -78,6 +84,9 @@
      name="pay">
         <menu_item_call.on_click
          function="Contacts.Friends.Pay"/>
+        <menu_item_call.on_enable
+         function="Contacts.Friends.EnableItem"
+         parameter="pay_agent"/>
     </menu_item_call>
     <menu_item_call
      label="Track Friend"
@@ -114,6 +123,9 @@
      name="url_copy">
         <menu_item_call.on_click
          function="Contacts.Friends.CopyUrl"/>
+        <menu_item_call.on_enable
+         function="Contacts.Friends.EnableItem"
+         parameter="copy_url"/>
     </menu_item_call>
     <!-- <FS:Zi> Add menu items to copy and/or insert mention URIs into chat -->
     <menu_item_call
@@ -122,6 +134,9 @@
      name="mention_copy_label">
         <menu_item_call.on_click
          function="Mention.CopyURI" />
+        <menu_item_call.on_enable
+         function="Contacts.Friends.EnableItem"
+         parameter="copy_mention"/>
     </menu_item_call>
     <!-- </FS:Zi> -->
     <menu_item_separator/>
