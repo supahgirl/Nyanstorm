@@ -46,6 +46,17 @@
     <key>Value</key>
     <string></string>
   </map>
+  <key>FSModelProviderConfigs</key>
+  <map>
+    <key>Comment</key>
+    <string>Saved AI model provider configurations (LLSD array)</string>
+    <key>Persist</key>
+    <integer>1</integer>
+    <key>Type</key>
+    <string>LLSD</string>
+    <key>Value</key>
+    <map/>
+  </map>
   <key>FSLandmarkCreatedNotification</key>
   <map>
     <key>Comment</key>
