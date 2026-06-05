@@ -1052,7 +1052,12 @@ void FSFloaterIM::onClose(bool app_quitting)
     LLAvatarTracker::instance().removeParticularFriendObserver(mOtherParticipantUUID, this);
     //</FS:ND> FIRE-6077 et al
 
-    gIMMgr->leaveSession(mSessionID);
+    // Don't destroy the IM session for AI agents — they are persistent
+    // and the user expects to be able to reopen the conversation later.
+    if (mSessionID != AI_AGENT_SESSION_ID && mSessionID != AI_AGENT_2_SESSION_ID)
+    {
+        gIMMgr->leaveSession(mSessionID);
+    }
 }
 
 void FSFloaterIM::onSnooze()
