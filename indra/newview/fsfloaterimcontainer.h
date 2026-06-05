@@ -229,7 +229,6 @@ struct AIConfigState
     std::string name;
     std::string persona;
     std::string instructions;
-    bool        web_search = true;
 };
 
 class FSFloaterAIConfig : public LLFloater
@@ -244,24 +243,18 @@ public:
     // Set by FSFloaterAIAgent::draw() so onOpen knows which session to edit
     static LLUUID sCurrentEditingSession;
 
-    static void onServerReset(const LLUUID& session_id);
+
     static void applySnapshot(const LLUUID& session_id,
                               const std::string& name,
                               const std::string& persona,
-                              const std::string& instructions,
-                              bool web_tools);
+                              const std::string& instructions);
     // Overload used when session_id is unknown — falls back to sCurrentEditingSession
     static void applySnapshot(const std::string& name,
                               const std::string& persona,
-                              const std::string& instructions,
-                              bool web_tools);
-    static void openLoadPickerForSession(const LLUUID& session_id);
-
+                              const std::string& instructions);
     // ── Session save/load ─────────────────────────────────────────────────
     // Called when /session export response arrives; immediately opens save picker
     static void onSessionExport(const LLUUID& session_id, const std::string& json);
-    // Called when /session load slash command is typed
-    static void openSessionLoadPicker(const LLUUID& session_id);
 
 private:
     LLUUID mCurrentSessionID; // session this floater instance is currently editing
@@ -273,11 +266,8 @@ private:
     void onAgentChanged();
     void onSaveFileSelected(const std::vector<std::string>& filenames);
     void onLoadFileSelected(const std::vector<std::string>& filenames);
-    static void onLoadForSessionFileSelected(const std::vector<std::string>& filenames);
-    static LLUUID sPendingLoadSessionID;
 
     static void onSessionSaveFileSelected(const std::vector<std::string>& filenames);
-    static void onSessionLoadFileSelected(const std::vector<std::string>& filenames);
     static LLUUID   sPendingSessionSessionID;
     static std::string sPendingSessionJSON;
 };

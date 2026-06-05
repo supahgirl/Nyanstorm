@@ -1830,7 +1830,6 @@ void FSFloaterDiscordContacts::openChatForSelected()
 
 /*static*/ std::map<LLUUID, AIConfigState> FSFloaterAIConfig::sConfigs;
 /*static*/ LLUUID                          FSFloaterAIConfig::sCurrentEditingSession;
-/*static*/ LLUUID                          FSFloaterAIConfig::sPendingLoadSessionID;
 /*static*/ LLUUID                          FSFloaterAIConfig::sPendingSessionSessionID;
 /*static*/ std::string                     FSFloaterAIConfig::sPendingSessionJSON;
 
@@ -1852,7 +1851,6 @@ void FSFloaterAIConfig::onOpen(const LLSD& key)
     getChild<LLLineEditor>("ai_config_name")->setText(cfg.name);
     getChild<LLTextEditor>("ai_config_persona")->setText(cfg.persona);
     getChild<LLTextEditor>("ai_config_instructions")->setText(cfg.instructions);
-    getChild<LLCheckBoxCtrl>("ai_config_web_search")->setValue(LLSD(cfg.web_search));
     getChild<LLTextBox>("ai_config_name_error")->setVisible(false);
     // Ask the server for the live config — routes to applySnapshot() asynchronously
     sendMCPRequest(mCurrentSessionID, "/config get");
@@ -1903,13 +1901,11 @@ void FSFloaterAIConfig::onOKClicked()
     cfg.name         = name;
     cfg.persona      = getChild<LLTextEditor>("ai_config_persona")->getText();
     cfg.instructions = getChild<LLTextEditor>("ai_config_instructions")->getText();
-    cfg.web_search   = getChild<LLCheckBoxCtrl>("ai_config_web_search")->getValue().asBoolean();
 
     boost::json::object payload;
     payload["name"]         = cfg.name;
     payload["persona"]      = cfg.persona;
     payload["instructions"] = cfg.instructions;
-    payload["web_tools"]    = cfg.web_search;
     sendMCPRequest(mCurrentSessionID, "/config apply " + boost::json::serialize(payload));
 
     closeFloater();
@@ -1933,7 +1929,6 @@ void FSFloaterAIConfig::onAgentChanged()
     getChild<LLLineEditor>("ai_config_name")->setText(cfg.name);
     getChild<LLTextEditor>("ai_config_persona")->setText(cfg.persona);
     getChild<LLTextEditor>("ai_config_instructions")->setText(cfg.instructions);
-    getChild<LLCheckBoxCtrl>("ai_config_web_search")->setValue(LLSD(cfg.web_search));
     getChild<LLTextBox>("ai_config_name_error")->setVisible(false);
     // Refresh from the live server for the newly selected agent
     sendMCPRequest(mCurrentSessionID, "/config get");
@@ -1989,7 +1984,6 @@ void FSFloaterAIConfig::onSaveFileSelected(const std::vector<std::string>& filen
     obj["name"]         = name_without_ext;
     obj["persona"]      = getChild<LLTextEditor>("ai_config_persona")->getText();
     obj["instructions"] = getChild<LLTextEditor>("ai_config_instructions")->getText();
-    obj["web_tools"]    = getChild<LLCheckBoxCtrl>("ai_config_web_search")->getValue().asBoolean();
 
     std::ofstream file(output_path);
     if (file.is_open())
@@ -2031,99 +2025,24 @@ void FSFloaterAIConfig::onLoadFileSelected(const std::vector<std::string>& filen
         cfg.persona      = std::string(obj["persona"].as_string());
     if (obj.contains("instructions") && obj["instructions"].is_string())
         cfg.instructions = std::string(obj["instructions"].as_string());
-    if (obj.contains("web_tools")    && obj["web_tools"].is_bool())
-        cfg.web_search   = obj["web_tools"].as_bool();
 
     getChild<LLLineEditor>("ai_config_name")->setText(cfg.name);
     getChild<LLTextEditor>("ai_config_persona")->setText(cfg.persona);
     getChild<LLTextEditor>("ai_config_instructions")->setText(cfg.instructions);
-    getChild<LLCheckBoxCtrl>("ai_config_web_search")->setValue(LLSD(cfg.web_search));
     getChild<LLTextBox>("ai_config_name_error")->setVisible(false);
     LL_INFOS() << "AI config loaded from " << filenames[0] << LL_ENDL;
-}
-
-/*static*/
-void FSFloaterAIConfig::openLoadPickerForSession(const LLUUID& session_id)
-{
-    sPendingLoadSessionID = session_id;
-    LLFilePickerReplyThread::startPicker(
-        boost::bind(&FSFloaterAIConfig::onLoadForSessionFileSelected, _1),
-        LLFilePicker::FFLOAD_ALL,
-        false);
-}
-
-/*static*/
-void FSFloaterAIConfig::onLoadForSessionFileSelected(const std::vector<std::string>& filenames)
-{
-    if (filenames.empty()) return;
-
-    std::ifstream file(filenames[0]);
-    if (!file.is_open()) { LL_WARNS() << "Cannot open: " << filenames[0] << LL_ENDL; return; }
-
-    std::string contents((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-    boost::system::error_code ec;
-    boost::json::value val = boost::json::parse(contents, ec);
-    if (ec) { LL_WARNS() << "JSON parse error: " << ec.message() << LL_ENDL; return; }
-
-    AIConfigState& cfg = sConfigs[sPendingLoadSessionID];
-    auto& obj = val.as_object();
-    if (obj.contains("name")         && obj["name"].is_string())
-        cfg.name         = std::string(obj["name"].as_string());
-    if (obj.contains("persona")      && obj["persona"].is_string())
-        cfg.persona      = std::string(obj["persona"].as_string());
-    if (obj.contains("instructions") && obj["instructions"].is_string())
-        cfg.instructions = std::string(obj["instructions"].as_string());
-    if (obj.contains("web_tools")    && obj["web_tools"].is_bool())
-        cfg.web_search   = obj["web_tools"].as_bool();
-
-    // Refresh the floater if it's open for this session
-    FSFloaterAIConfig* instance = LLFloaterReg::findTypedInstance<FSFloaterAIConfig>("fs_ai_config");
-    if (instance && instance->isInVisibleChain() && instance->mCurrentSessionID == sPendingLoadSessionID)
-    {
-        instance->getChild<LLLineEditor>("ai_config_name")->setText(cfg.name);
-        instance->getChild<LLTextEditor>("ai_config_persona")->setText(cfg.persona);
-        instance->getChild<LLTextEditor>("ai_config_instructions")->setText(cfg.instructions);
-        instance->getChild<LLCheckBoxCtrl>("ai_config_web_search")->setValue(LLSD(cfg.web_search));
-    }
-
-    boost::json::object payload;
-    payload["name"]         = cfg.name;
-    payload["persona"]      = cfg.persona;
-    payload["instructions"] = cfg.instructions;
-    payload["web_tools"]    = cfg.web_search;
-    sendMCPRequest(sPendingLoadSessionID, "/config apply " + boost::json::serialize(payload));
-
-    LL_INFOS() << "AI config loaded from " << filenames[0] << LL_ENDL;
-}
-
-/*static*/
-void FSFloaterAIConfig::onServerReset(const LLUUID& session_id)
-{
-    sConfigs[session_id] = AIConfigState{};   // reset to defaults
-
-    FSFloaterAIConfig* instance = LLFloaterReg::findTypedInstance<FSFloaterAIConfig>("fs_ai_config");
-    if (instance && instance->isInVisibleChain() && instance->mCurrentSessionID == session_id)
-    {
-        instance->getChild<LLLineEditor>("ai_config_name")->setText(std::string());
-        instance->getChild<LLTextEditor>("ai_config_persona")->setText(std::string());
-        instance->getChild<LLTextEditor>("ai_config_instructions")->setText(std::string());
-        instance->getChild<LLCheckBoxCtrl>("ai_config_web_search")->setValue(LLSD(true));
-        instance->getChild<LLTextBox>("ai_config_name_error")->setVisible(false);
-    }
 }
 
 /*static*/
 void FSFloaterAIConfig::applySnapshot(const LLUUID& session_id,
                                        const std::string& name,
                                        const std::string& persona,
-                                       const std::string& instructions,
-                                       bool web_tools)
+                                       const std::string& instructions)
 {
     AIConfigState& cfg   = sConfigs[session_id];
     cfg.name         = name;
     cfg.persona      = persona;
     cfg.instructions = instructions;
-    cfg.web_search   = web_tools;
 
     FSFloaterAIConfig* instance = LLFloaterReg::findTypedInstance<FSFloaterAIConfig>("fs_ai_config");
     if (instance && instance->isInVisibleChain() && instance->mCurrentSessionID == session_id)
@@ -2131,15 +2050,14 @@ void FSFloaterAIConfig::applySnapshot(const LLUUID& session_id,
         instance->getChild<LLLineEditor>("ai_config_name")->setText(cfg.name);
         instance->getChild<LLTextEditor>("ai_config_persona")->setText(cfg.persona);
         instance->getChild<LLTextEditor>("ai_config_instructions")->setText(cfg.instructions);
-        instance->getChild<LLCheckBoxCtrl>("ai_config_web_search")->setValue(LLSD(cfg.web_search));
     }
 }
 
 /*static*/
-void FSFloaterAIConfig::applySnapshot(const std::string& name, const std::string& persona, const std::string& instructions, bool web_tools)
+void FSFloaterAIConfig::applySnapshot(const std::string& name, const std::string& persona, const std::string& instructions)
 {
     // Overload without session_id — uses sCurrentEditingSession (called during /config get response)
-    applySnapshot(sCurrentEditingSession, name, persona, instructions, web_tools);
+    applySnapshot(sCurrentEditingSession, name, persona, instructions);
 }
 
 // ── Session save (export) ─────────────────────────────────────────────────────
@@ -2179,83 +2097,6 @@ void FSFloaterAIConfig::onSessionSaveFileSelected(const std::vector<std::string>
         out << sPendingSessionJSON;
 
     sPendingSessionJSON.clear();
-}
-
-// ── Session load ──────────────────────────────────────────────────────────────
-
-/*static*/
-void FSFloaterAIConfig::openSessionLoadPicker(const LLUUID& session_id)
-{
-    sPendingSessionSessionID = session_id;
-    LLFilePickerReplyThread::startPicker(
-        boost::bind(&FSFloaterAIConfig::onSessionLoadFileSelected, _1),
-        LLFilePicker::FFLOAD_ALL,
-        false);
-}
-
-/*static*/
-void FSFloaterAIConfig::onSessionLoadFileSelected(const std::vector<std::string>& filenames)
-{
-    if (filenames.empty()) return;
-
-    std::ifstream in(filenames[0]);
-    if (!in.is_open()) return;
-    std::string raw((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-
-    // Parse and validate
-    boost::json::value jv;
-    try { jv = boost::json::parse(raw); } catch (...) { return; }
-    if (!jv.is_object()) return;
-    auto& obj = jv.as_object();
-
-    const LLUUID session_id = sPendingSessionSessionID;
-
-    // 1. Apply config fields locally
-    std::string name         = obj.contains("name")         && obj["name"].is_string()         ? std::string(obj["name"].as_string())         : "";
-    std::string persona      = obj.contains("persona")      && obj["persona"].is_string()      ? std::string(obj["persona"].as_string())      : "";
-    std::string instructions = obj.contains("instructions") && obj["instructions"].is_string() ? std::string(obj["instructions"].as_string()) : "";
-    bool        web_tools    = obj.contains("web_tools")    && obj["web_tools"].is_bool()      ? obj["web_tools"].as_bool()                   : true;
-    applySnapshot(session_id, name, persona, instructions, web_tools);
-
-    // 2. Rebuild the visible chat history
-    LLIMModel::LLIMSession* imsession = LLIMModel::instance().findIMSession(session_id);
-    if (imsession && obj.contains("history") && obj["history"].is_array())
-    {
-        imsession->mMsgs.clear();
-
-        // Determine display names
-        std::string agent_name = (session_id == AI_AGENT_2_SESSION_ID) ? "AI Agent 2" : "AI Agent";
-        if (session_id == AI_AGENT_SESSION_ID && gSavedSettings.controlExists("FSAIAgentName1"))
-            agent_name = gSavedSettings.getString("FSAIAgentName1");
-        else if (session_id == AI_AGENT_2_SESSION_ID && gSavedSettings.controlExists("FSAIAgentName2"))
-            agent_name = gSavedSettings.getString("FSAIAgentName2");
-
-        std::string user_name = "You";
-        LLAgentUI::buildFullname(user_name);
-
-        // History is oldest-first; addMessage pushes to front, so iterate in reverse
-        const auto& hist = obj.at("history").as_array();
-        for (auto it = hist.rbegin(); it != hist.rend(); ++it)
-        {
-            if (!it->is_object()) continue;
-            const auto& m = it->as_object();
-            std::string role    = m.contains("role")    && m.at("role").is_string()    ? std::string(m.at("role").as_string())    : "";
-            std::string content = m.contains("content") && m.at("content").is_string() ? std::string(m.at("content").as_string()) : "";
-            if (content.empty()) continue;
-
-            std::string from = (role == "assistant") ? agent_name : user_name;
-            LLUUID       fid = (role == "assistant") ? session_id : LLUUID::null;
-            imsession->addMessage(from, fid, content, "", CHAT_STYLE_HISTORY, false, 0);
-        }
-
-        // Refresh the IM floater display
-        FSFloaterIM* floater = LLFloaterReg::findTypedInstance<FSFloaterIM>("panel_ai_agent", session_id);
-        if (floater)
-            floater->reloadMessages(false);
-    }
-
-    // 3. Send the full session to the server to restore its state
-    sendMCPRequest(session_id, "/session import " + raw);
 }
 
 // EOF

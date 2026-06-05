@@ -115,20 +115,12 @@
         max_length="8192"/>
     </layout_panel>
 
-    <!-- Bottom controls: web search + buttons -->
+    <!-- Bottom controls: buttons -->
     <layout_panel
       name="controls_panel"
       auto_resize="false"
       user_resize="false"
       height="56">
-      <check_box
-        layout="topleft"
-        follows="top|left"
-        font="SansSerifSmall"
-        height="16"
-        left="10" top="4"
-        label="Web search"
-        name="ai_config_web_search"/>
       <button
         layout="topleft"
         follows="top|left"
