@@ -788,8 +788,7 @@ static void onMCPServerSuccess(const LLUUID& session_id, const LLSD& result)
 					std::string name         = obj.contains("name")         && obj["name"].is_string()         ? std::string(obj["name"].as_string())         : "";
 					std::string persona      = obj.contains("persona")      && obj["persona"].is_string()      ? std::string(obj["persona"].as_string())      : "";
 					std::string instructions = obj.contains("instructions") && obj["instructions"].is_string() ? std::string(obj["instructions"].as_string()) : "";
-					bool        web_tools    = obj.contains("web_tools")    && obj["web_tools"].is_bool()      ? obj["web_tools"].as_bool()                   : true;
-					FSFloaterAIConfig::applySnapshot(session_id, name, persona, instructions, web_tools);
+					FSFloaterAIConfig::applySnapshot(session_id, name, persona, instructions);
 					return; // don't add to chat
 				}
 				if (obj.contains("type") && obj["type"].as_string() == "model_list")
@@ -1490,85 +1489,10 @@ void FSFloaterIM::sendMsg(const std::string& msg)
 		LLIMModel::instance().addMessage(mSessionID, from, gAgent.getID(), utf8_text);
 		updateMessages();
 
-		// Slash-commands go via MCP protocol (port 3000)
-		// Inference prompts are streamed token-by-token via port 3000
-		bool is_slash_command = utf8_text.size() > 0 && utf8_text[0] == '/';
-		if (is_slash_command)
+		// Slash-commands are not supported — ignore them.
+		if (utf8_text.size() > 0 && utf8_text[0] == '/')
 		{
-			// Sync client-side AI config state from slash commands
-			bool send_to_server = true;
-			{
-				std::string trimmed = utf8_text;
-				LLStringUtil::trim(trimmed);
-				std::string lower = trimmed;
-				LLStringUtil::toLower(lower);
-
-				if (lower == "/reset" || lower == "/reset all")
-				{
-					FSFloaterAIConfig::onServerReset(mSessionID);
-				}
-				// /config name <name>
-				else if (lower.rfind("/config name ", 0) == 0 && trimmed.size() > 13)
-				{
-					FSFloaterAIConfig::sConfigs[mSessionID].name = trimmed.substr(13);
-					FSFloaterAIConfig* inst = LLFloaterReg::findTypedInstance<FSFloaterAIConfig>("fs_ai_config");
-					if (inst) inst->getChild<LLLineEditor>("ai_config_name")->setText(FSFloaterAIConfig::sConfigs[mSessionID].name);
-				}
-				// /config persona <text>
-				else if (lower.rfind("/config persona ", 0) == 0 && trimmed.size() > 16)
-				{
-					FSFloaterAIConfig::sConfigs[mSessionID].persona = trimmed.substr(16);
-					FSFloaterAIConfig* inst = LLFloaterReg::findTypedInstance<FSFloaterAIConfig>("fs_ai_config");
-					if (inst) inst->getChild<LLTextEditor>("ai_config_persona")->setText(FSFloaterAIConfig::sConfigs[mSessionID].persona);
-				}
-				// /config inst <text>
-				else if (lower.rfind("/config inst ", 0) == 0 && trimmed.size() > 13)
-				{
-					FSFloaterAIConfig::sConfigs[mSessionID].instructions = trimmed.substr(13);
-					FSFloaterAIConfig* inst = LLFloaterReg::findTypedInstance<FSFloaterAIConfig>("fs_ai_config");
-					if (inst) inst->getChild<LLTextEditor>("ai_config_instructions")->setText(FSFloaterAIConfig::sConfigs[mSessionID].instructions);
-				}
-				// /config web on / off
-				else if (lower == "/config web on")
-				{
-					FSFloaterAIConfig::sConfigs[mSessionID].web_search = true;
-					FSFloaterAIConfig* inst = LLFloaterReg::findTypedInstance<FSFloaterAIConfig>("fs_ai_config");
-					if (inst) inst->getChild<LLCheckBoxCtrl>("ai_config_web_search")->setValue(LLSD(true));
-				}
-				else if (lower == "/config web off")
-				{
-					FSFloaterAIConfig::sConfigs[mSessionID].web_search = false;
-					FSFloaterAIConfig* inst = LLFloaterReg::findTypedInstance<FSFloaterAIConfig>("fs_ai_config");
-					if (inst) inst->getChild<LLCheckBoxCtrl>("ai_config_web_search")->setValue(LLSD(false));
-				}
-				// /config save → server uses the current name (no client-side action needed)
-				// /config load → open file picker, apply config, push to server (don't forward command)
-				else if (lower == "/config load")
-				{
-					FSFloaterAIConfig::openLoadPickerForSession(mSessionID);
-					send_to_server = false;
-				}
-				// /history → request full history from server; creates a notecard
-				else if (lower == "/history")
-				{
-					sendMCPRequest(mSessionID, "/history json");
-					send_to_server = false;
-				}
-				// /session save → request export from server; file picker opens on response
-				else if (lower == "/session save")
-				{
-					sendMCPRequest(mSessionID, "/session export");
-					send_to_server = false;
-				}
-				// /session load → open file picker, restore history + config (don't forward command)
-				else if (lower == "/session load")
-				{
-					FSFloaterAIConfig::openSessionLoadPicker(mSessionID);
-					send_to_server = false;
-				}
-			}
-			if (send_to_server)
-				sendMCPRequest(mSessionID, utf8_text);
+			return;
 		}
 		else
 		{
