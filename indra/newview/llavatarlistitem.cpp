@@ -625,6 +625,21 @@ void LLAvatarListItem::setNameInternal(const std::string& name, const std::strin
         {
             avatar_name_style.color = contact_set_color;
         }
+        else if (gSavedSettings.getBOOL("FSColorAvatarsByGender"))
+        {
+            LLVOAvatar* avVo = static_cast<LLVOAvatar*>(gObjectList.findObject(mAvatarId));
+            if (avVo)
+            {
+                if (avVo->getSex() == SEX_FEMALE)
+                {
+                    avatar_name_style.color = LLColor4::pink;
+                }
+                else if (avVo->getSex() == SEX_MALE)
+                {
+                    avatar_name_style.color = LLColor4::orange;
+                }
+            }
+        }
     }
     LLTextUtil::textboxSetHighlightedVal(mAvatarName, avatar_name_style, name, highlight);
     // </FS:Ansariel>
