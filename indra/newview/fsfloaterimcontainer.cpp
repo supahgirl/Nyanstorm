@@ -1464,7 +1464,7 @@ void FSFloaterAIModelConfig::setEndpointAndApiKey(const std::string& type)
 
     if (type == "ollama")
     {
-        endpoint->setValue(LLSD("http://localhost:11434/api/chat"));
+        endpoint->setValue(LLSD("http://localhost:11434/v1/chat/completions"));
         apikey->setValue(LLSD(""));
         apikey->setEnabled(false);
     }

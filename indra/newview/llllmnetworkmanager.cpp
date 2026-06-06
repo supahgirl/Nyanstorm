@@ -304,8 +304,22 @@ static size_t llmStreamWriteCallback(void* contents, size_t size, size_t nmemb, 
                     }
                 }
             }
+            else if (root.contains("message") && root["message"].is_object())
+            {
+                // ── Ollama native /api/chat format ──
+                // Ollama streams the whole message object repeatedly,
+                // not delta chunks. Take the latest content.
+                auto& msg = root["message"].as_object();
+                if (msg.contains("content") && msg["content"].is_string())
+                {
+                    std::string token = msg["content"].as_string().c_str();
+                    if (!token.empty())
+                        queueMCPEvent(ctx->session_id, token, false);
+                }
+            }
         }
-        catch (...) { /* skip malformed chunks */ }
+        catch (const std::exception& e) { LL_WARNS("LLM") << "Stream parse error: " << e.what() << " payload=" << payload.substr(0, 200) << LL_ENDL; }
+        catch (...) { LL_WARNS("LLM") << "Stream parse error (unknown) payload=" << payload.substr(0, 200) << LL_ENDL; }
     }
     return total;
 }
