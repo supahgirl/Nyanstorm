@@ -1533,8 +1533,6 @@ void AOEngine::reloadStateAnimations(AOSet* set, AOSet::AOState* state)
         }
     }
 
-    updateSortOrder(state);
-
     if (auto currentState = gSavedPerAccountSettings.getLLSD("FSCurrentAOState");
         currentState.has("CurrentSet") && currentState["CurrentSet"].asString() == set->getName() &&
         currentState.has("CurrentStateAnimations") && currentState["CurrentStateAnimations"].has(state->mName))
