@@ -549,6 +549,8 @@ void FloaterAO::onSelectState()
     mCycleTimeSpinner->setValue(mSelectedState->mCycleTime);
 
     updateCycleParameters();
+
+    refreshItemStyling();
 }
 
 void FloaterAO::onClickReload()
