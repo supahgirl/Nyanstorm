@@ -41,7 +41,9 @@
 #include "lllogchat.h"
 #include "llparcel.h"
 #include "llviewermenu.h"           // for gMenuHolder
+#include "llfloaterreg.h"
 #include "llconversationmodel.h"
+
 #include "llviewerobjectlist.h"
 #include "llviewerparcelmgr.h"
 #include "llviewerregion.h"

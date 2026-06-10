@@ -42,7 +42,9 @@
 #include "llurlaction.h"
 #include "llviewercontrol.h"
 #include "llviewermenu.h"
+#include "llfloaterreg.h"
 #include "llvoiceclient.h"
+
 
 //FSParticipantList retrieves add, clear and remove events and updates view accordingly
 
@@ -536,6 +538,8 @@ LLContextMenu* FSParticipantList::FSParticipantListMenu::createMenu()
 
     registrar.add("Mention.CopyURI", boost::bind(&FSParticipantList::FSParticipantListMenu::copyURLToClipboard, this, mUUIDs.front()));
     registrar.add("Mention.Chat", boost::bind(&FSParticipantList::FSParticipantListMenu::insertMentionAtCursor, this, mUUIDs.front()));
+
+
 
     enable_registrar.add("ParticipantList.EnableItem", boost::bind(&FSParticipantList::FSParticipantListMenu::enableContextMenuItem,    this, _2));
     enable_registrar.add("ParticipantList.EnableItem.Moderate", boost::bind(&FSParticipantList::FSParticipantListMenu::enableModerateContextMenuItem,   this, _2));
