@@ -225,6 +225,11 @@
 							 name="range"
 							 width="61"/>
 							<radar_list.columns
+							 label="Height"
+							 name="height"
+							 tool_tip="Avatar height in centimeters"
+							 width="50"/>
+							<radar_list.columns
 							 name="seen_sort"
 							 width="-1"/>
 						</radar_list>

@@ -102,6 +102,7 @@ FSPanelRadar::FSPanelRadar()
     mColumnBits["seen"] = 128;
     mColumnBits["range"] = 256;
     mColumnBits["has_notes"] = 512;
+    mColumnBits["height"] = 1024;
 }
 
 FSPanelRadar::~FSPanelRadar()
@@ -391,8 +392,13 @@ void FSPanelRadar::updateList(const std::vector<LLSD>& entries, const LLSD& stat
         row_data["columns"][9]["value"] = entry["range"];
         row_data["columns"][9]["font"] = font_name;
 
-        row_data["columns"][10]["column"] = "seen_sort";
-        row_data["columns"][10]["value"] = entry["seen"].asString() + "_" + entry["name"].asString();
+        row_data["columns"][10]["column"] = "height";
+        row_data["columns"][10]["value"] = entry["height"];
+        row_data["columns"][10]["halign"] = "right";
+        row_data["columns"][10]["font"] = font_name;
+
+        row_data["columns"][11]["column"] = "seen_sort";
+        row_data["columns"][11]["value"] = entry["seen"].asString() + "_" + entry["name"].asString();
 
         LLScrollListItem* row = mRadarList->addElement(row_data);
 

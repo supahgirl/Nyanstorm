@@ -161,6 +161,16 @@
 			 function="Radar.ToggleColumn"
 			 parameter="seen"/>
 		</menu_item_check>
+		<menu_item_check
+		 label="Height"
+		 name="height">
+			<menu_item_check.on_check
+			 function="Radar.EnableColumn"
+			 parameter="height"/>
+			<menu_item_check.on_click
+			 function="Radar.ToggleColumn"
+			 parameter="height"/>
+		</menu_item_check>
 	</context_menu>
 	<menu_item_check
 	 label="Color names based on distance"
