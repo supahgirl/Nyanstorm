@@ -1,6 +1,6 @@
 # Nyanstorm — Firestorm viewer fork
 
-Firestorm fork with AI agent chat, Discord integration, AO enhancements, and gender-based avatar coloring. Based on Firestorm 7.2.4.
+Firestorm fork with AI agent chat, Discord integration, AO enhancements, avatar height detection, and gender-based avatar coloring. Based on Firestorm 7.2.4.
 
 ---
 
@@ -92,6 +92,14 @@ The built-in client-side AO panel gets several quality-of-life improvements:
 - Sort order is never persisted to the notecard — manual reordering (Move Up/Down) is the only way to change the stored order
 
 All controls are in the full AO panel (click the wrench icon to expand from the compact view).
+
+### Height Detection in Nearby People Panel
+
+Avatars in the Nearby radar list show a **Height** column displaying their avatar height in centimetres, calculated from the avatar's body mesh size.
+
+- The column is toggleable via the radar options menu (right-click the column header)
+- Height is displayed as a rounded integer in cm (e.g. `172`)
+- Shows `?` when the avatar mesh is not yet loaded or out of draw distance
 
 ### Gender-Based Avatar Coloring
 
