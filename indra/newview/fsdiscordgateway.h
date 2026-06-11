@@ -149,7 +149,7 @@ private:
 
     bool connectGateway();
     void sendPresenceUpdate(const std::string& status);
-    void handleGatewayMessage(const std::string& data);
+    bool handleGatewayMessage(const std::string& data);  // returns true if reconnect needed
     void handleDispatch(const boost::json::object& d, const std::string& t, int seq);
     void handleHello(const boost::json::object& d);
     void scheduleReconnect();

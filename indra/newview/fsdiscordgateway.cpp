@@ -633,16 +633,11 @@ bool FSDiscordGateway::connectGateway()
                 break;
             }
             std::string data = beast::buffers_to_string(buffer.data());
-            try
+            if (handleGatewayMessage(data))
             {
-                handleGatewayMessage(data);
-            }
-            catch (const std::exception& e)
-            {
-                // Protocol-level reconnect signal (OP_RECONNECT / OP_INVALID_SESSION)
-                // caught here before it unwinds through noexcept beast destructors
-                GWLOG("Reconnect signal: %s — reconnecting", e.what());
-                LL_INFOS("DiscordGateway") << "Reconnect signal: " << e.what() << LL_ENDL;
+                // Server requested reconnect (OP_RECONNECT / OP_INVALID_SESSION)
+                GWLOG("Reconnect signal — reconnecting");
+                LL_INFOS("DiscordGateway") << "Reconnect signal — reconnecting" << LL_ENDL;
                 break;
             }
         } // end while(mRunning)
@@ -661,15 +656,15 @@ bool FSDiscordGateway::connectGateway()
     }
 }
 
-void FSDiscordGateway::handleGatewayMessage(const std::string& data)
+bool FSDiscordGateway::handleGatewayMessage(const std::string& data)
 {
     try
     {
         boost::json::value jv = boost::json::parse(data);
-        if (!jv.is_object()) return;
+        if (!jv.is_object()) return false;
         auto& obj = jv.as_object();
 
-        if (!obj.contains("op")) return;
+        if (!obj.contains("op")) return false;
         int op = (int)obj["op"].as_int64();
         int seq = obj.contains("s") && !obj["s"].is_null() ? (int)obj["s"].as_int64() : 0;
         if (op == OP_DISPATCH && seq > 0) mSession.sequence = seq;
@@ -689,11 +684,11 @@ void FSDiscordGateway::handleGatewayMessage(const std::string& data)
             break;
         case OP_RECONNECT:
             LL_INFOS("DiscordGateway") << "Server requested reconnect (OP 7)" << LL_ENDL;
-            throw std::runtime_error("reconnect requested");
+            return true;
         case OP_INVALID_SESSION:
             LL_WARNS("DiscordGateway") << "Invalid session (OP 9)" << LL_ENDL;
             mSession.session_id.clear();
-            throw std::runtime_error("invalid session");
+            return true;
         case OP_HEARTBEAT_ACK:
             mLastHeartbeatAck = std::chrono::steady_clock::now();
             break;
@@ -707,13 +702,10 @@ void FSDiscordGateway::handleGatewayMessage(const std::string& data)
     }
     catch (const std::exception& e)
     {
-        std::string msg = e.what();
-        // Re-throw protocol-level errors that signal reconnection
-        if (msg == "reconnect requested" || msg == "invalid session")
-            throw;
-        // Everything else (JSON parse errors, unknown events) is non-fatal
-        LL_WARNS("DiscordGateway") << "Non-fatal error handling message: " << msg << LL_ENDL;
+        // Non-fatal errors (JSON parse failures, etc.)
+        LL_WARNS("DiscordGateway") << "Non-fatal error handling message: " << e.what() << LL_ENDL;
     }
+    return false;
 }
 
 void FSDiscordGateway::handleDispatch(const boost::json::object& d, const std::string& t, int seq)
