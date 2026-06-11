@@ -369,10 +369,4 @@ bool FSRadarMenu::checkSetRenderMode(const LLSD& userdata)
     return FSAvatarRenderPersistence::instance().getAvatarRenderSettings(mUUIDs.front()) == render_setting;
 }
 
-{
-    if (!mUUIDs.empty())
-    {
-    }
-}
-
 } // namespace FSFloaterRadarMenu
