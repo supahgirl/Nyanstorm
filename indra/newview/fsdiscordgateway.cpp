@@ -633,7 +633,18 @@ bool FSDiscordGateway::connectGateway()
                 break;
             }
             std::string data = beast::buffers_to_string(buffer.data());
-            handleGatewayMessage(data);
+            try
+            {
+                handleGatewayMessage(data);
+            }
+            catch (const std::exception& e)
+            {
+                // Protocol-level reconnect signal (OP_RECONNECT / OP_INVALID_SESSION)
+                // caught here before it unwinds through noexcept beast destructors
+                GWLOG("Reconnect signal: %s — reconnecting", e.what());
+                LL_INFOS("DiscordGateway") << "Reconnect signal: " << e.what() << LL_ENDL;
+                break;
+            }
         } // end while(mRunning)
 
         // Try clean close (ignore error if already closed)
