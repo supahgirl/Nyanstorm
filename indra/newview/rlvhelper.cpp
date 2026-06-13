@@ -1573,6 +1573,38 @@ bool RlvForceWear::isStrippable(const LLInventoryItem* pItem)
             else
                 pFolder = NULL;
         }
+
+        // The item itself and its own folder passed the nostrip check above.
+        // However, the user may have placed a *link* to this item inside a (nostrip)
+        // folder in #RLV. When worn, the server resolves the link and stores the actual
+        // item UUID as AttachItemID — so the link's parent folder is never reached by
+        // the checks above. We scan the #RLV subtree for any link pointing to this item
+        // that lives inside a (nostrip) folder.
+        const LLUUID& idSharedRoot = RlvInventory::instance().getSharedRootID();
+        if (idSharedRoot.notNull())
+        {
+            LLInventoryModel::cat_array_t  cats;
+            LLInventoryModel::item_array_t rlvItems;
+            gInventory.collectDescendents(idSharedRoot, cats, rlvItems, LLInventoryModel::EXCLUDE_TRASH);
+            for (const LLViewerInventoryItem* pLink : rlvItems)
+            {
+                if (pLink->getActualType() != LLAssetType::AT_LINK)
+                    continue;
+                if (pLink->getLinkedUUID() != pItem->getUUID())
+                    continue;
+                // Found a link — check if any ancestor folder contains "nostrip"
+                LLViewerInventoryCategory* pLinkFolder = gInventory.getCategory(pLink->getParentUUID());
+                while (pLinkFolder)
+                {
+                    if (std::string::npos != pLinkFolder->getName().find(RLV_FOLDER_FLAG_NOSTRIP))
+                        return false;
+                    if ( (gInventory.getRootFolderID() != pLinkFolder->getParentUUID()) && (RlvInventory::isFoldedFolder(pLinkFolder, true)) )
+                        pLinkFolder = gInventory.getCategory(pLinkFolder->getParentUUID());
+                    else
+                        pLinkFolder = NULL;
+                }
+            }
+        }
     }
     return true;
 }
