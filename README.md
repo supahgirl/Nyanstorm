@@ -1,6 +1,6 @@
 # Nyanstorm — Firestorm viewer fork
 
-Firestorm fork with AI agent chat, Discord integration, AO enhancements, avatar height detection, and gender-based avatar coloring. Based on Firestorm 7.2.4.
+Firestorm fork with AI agent chat, Discord integration, AO enhancements, avatar height detection, gender-based avatar coloring, and RLV (nostrip) link protection. Based on Firestorm 7.2.4.
 
 ---
 
@@ -100,6 +100,21 @@ Avatars in the Nearby radar list show a **Height** column displaying their avata
 - The column is toggleable via the radar options menu (right-click the column header)
 - Height is displayed as a rounded integer in cm (e.g. `172`)
 - Shows `?` when the avatar mesh is not yet loaded or out of draw distance
+
+### RLV (nostrip) Protection via Links
+
+The standard RLV `(nostrip)` folder protection is extended to work correctly with inventory links.
+
+**The problem:** When an attachment is worn, the server resolves any inventory link to the actual item UUID. RLV `@remattach:<UUID>=force` commands use this resolved UUID, so the viewer's nostrip check looked at the actual item's parent folder — never at the link inside `#RLV/BASE (nostrip)/`. This meant a link in a `(nostrip)` folder provided no protection against force-detach commands.
+
+**The fix:** The viewer now scans the `#RLV` shared folder tree for any link pointing to the item being stripped. If a matching link is found inside a folder whose name contains `(nostrip)`, the item is treated as protected and the force-detach is blocked.
+
+**How to use:**
+1. Create a folder named anything ending in `(nostrip)` inside `#RLV` (e.g. `#RLV/BASE (nostrip)`)
+2. Place **links** to your worn attachments inside that folder
+3. RLV `@remattach=force` and `@detach=force` commands will no longer be able to remove those attachments
+
+This matches the expected behaviour described in the RLV specification.
 
 ### Gender-Based Avatar Coloring
 
