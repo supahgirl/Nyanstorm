@@ -563,7 +563,14 @@ static void sendDiscordTyping(const LLUUID& session_uuid, bool typing)
 			sock.connect(ep, ec);
 			if (ec) return;
 			// Set a 1-second send timeout to avoid thread accumulation
-			sock.set_option(asio::socket_base::send_timeout(std::chrono::seconds(1)), ec);
+#ifdef _WIN32
+			DWORD snd_to_ms = 1000;
+			setsockopt(sock.native_handle(), SOL_SOCKET, SO_SNDTIMEO,
+					   reinterpret_cast<const char*>(&snd_to_ms), sizeof(snd_to_ms));
+#else
+			struct timeval snd_to{1, 0};
+			setsockopt(sock.native_handle(), SOL_SOCKET, SO_SNDTIMEO, &snd_to, sizeof(snd_to));
+#endif
 
 			std::string request =
 				"POST /typing HTTP/1.1\r\n"

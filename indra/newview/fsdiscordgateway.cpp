@@ -1360,9 +1360,15 @@ void FSDiscordGateway::httpServerThreadFunc()
             break;
         }
 
-        // Set a 5-second receive timeout (Boost.ASIO 1.75+)
-        client_sock.set_option(
-            asio::socket_base::receive_timeout(std::chrono::seconds(5)), accept_ec);
+        // Set a 5-second receive timeout via native socket option
+#ifdef _WIN32
+        DWORD rcv_timeout_ms = 5000;
+        setsockopt(client_sock.native_handle(), SOL_SOCKET, SO_RCVTIMEO,
+                   reinterpret_cast<const char*>(&rcv_timeout_ms), sizeof(rcv_timeout_ms));
+#else
+        struct timeval rcv_tv{5, 0};
+        setsockopt(client_sock.native_handle(), SOL_SOCKET, SO_RCVTIMEO, &rcv_tv, sizeof(rcv_tv));
+#endif
 
         // Read the full HTTP request (loop to reassemble fragmented TCP)
         std::string request;
@@ -1629,8 +1635,14 @@ void FSDiscordGateway::serveSSE(boost::asio::ip::tcp::socket client_sock)
     LL_INFOS("DiscordGateway") << "SSE client connected" << LL_ENDL;
 
     // Set send timeout (30 s) so a dead client doesn't block the thread forever
-    client_sock.set_option(
-        asio::socket_base::send_timeout(std::chrono::seconds(30)), ec);
+#ifdef _WIN32
+    DWORD snd_timeout_ms = 30000;
+    setsockopt(client_sock.native_handle(), SOL_SOCKET, SO_SNDTIMEO,
+               reinterpret_cast<const char*>(&snd_timeout_ms), sizeof(snd_timeout_ms));
+#else
+    struct timeval snd_tv{30, 0};
+    setsockopt(client_sock.native_handle(), SOL_SOCKET, SO_SNDTIMEO, &snd_tv, sizeof(snd_tv));
+#endif
 
     while (true)
     {
