@@ -525,7 +525,7 @@ void FSRadar::updateRadarList()
         entry["range"] = (avRange > AVATAR_UNKNOWN_RANGE ? llformat("%3.2f", avRange) : llformat(">%3.2f", drawRadius));
         entry["typing"] = (avVo && avVo->isTyping());
         entry["sitting"] = (avVo && (avVo->getParent() || avVo->isMotionActive(ANIM_AGENT_SIT_GROUND) || avVo->isMotionActive(ANIM_AGENT_SIT_GROUND_CONSTRAINED)));
-        entry["height"] = (avVo ? llformat("%.0f", avVo->mBodySize.mV[VZ] * 100.0f) : "?");
+        entry["height"] = (avVo ? llformat("%.0f", avVo->mBodySize.mV[VZ] * 100.0f + 20.0f) : "?");
 
         if (!gRlvHandler.hasBehaviour(RLV_BHVR_SHOWNAMES))
         {
