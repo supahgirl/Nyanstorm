@@ -66,10 +66,9 @@
 #include "llinventorydefines.h"
 #include "llfloaterperms.h"
 #include <boost/json.hpp>
+#include <boost/asio.hpp>
 #include <fstream>
 #include <sstream>
-#include <sys/socket.h>
-#include <arpa/inet.h>
 #include <thread>
 
 // Defined in fsfloaterim.cpp — sends a slash command to the MCP server
@@ -89,21 +88,27 @@ void postToRelay(const std::string& path, const std::string& body)
 {
     std::thread([path, body]()
     {
-        int sock = ::socket(AF_INET, SOCK_STREAM, 0);
-        if (sock < 0) return;
-        struct sockaddr_in addr{};
-        addr.sin_family = AF_INET;
-        addr.sin_port   = htons(3002);
-        ::inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
-        if (::connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) { ::close(sock); return; }
-        std::string req = "POST " + path + " HTTP/1.1\r\n"
-                          "Host: 127.0.0.1:3002\r\n"
-                          "Content-Type: application/json\r\n"
-                          "Content-Length: " + std::to_string(body.size()) + "\r\n"
-                          "Connection: close\r\n\r\n" + body;
-        ::send(sock, req.c_str(), req.size(), 0);
-        char buf[256]; while (::recv(sock, buf, sizeof(buf), 0) > 0) {}
-        ::close(sock);
+        namespace asio = boost::asio;
+        using tcp = asio::ip::tcp;
+        try
+        {
+            asio::io_context ioc;
+            tcp::socket sock(ioc);
+            tcp::endpoint ep(asio::ip::make_address("127.0.0.1"), 3002);
+            boost::system::error_code ec;
+            sock.connect(ep, ec);
+            if (ec) return;
+            std::string req = "POST " + path + " HTTP/1.1\r\n"
+                              "Host: 127.0.0.1:3002\r\n"
+                              "Content-Type: application/json\r\n"
+                              "Content-Length: " + std::to_string(body.size()) + "\r\n"
+                              "Connection: close\r\n\r\n" + body;
+            asio::write(sock, asio::buffer(req), ec);
+            // Drain response
+            char buf[256];
+            while (sock.read_some(asio::buffer(buf), ec) > 0) {}
+        }
+        catch (...) {}
     }).detach();
 }
 
@@ -1589,72 +1594,73 @@ void FSFloaterDiscordContacts::fetchContacts()
 
     std::thread([this]()
     {
+        namespace asio = boost::asio;
+        using tcp = asio::ip::tcp;
+
         std::vector<DiscordContact> result;
 
-        int sock = ::socket(AF_INET, SOCK_STREAM, 0);
-        if (sock < 0) { goto done; }
-
+        try
         {
-            struct sockaddr_in addr;
-            addr.sin_family = AF_INET;
-            addr.sin_port   = htons(DISCORD_CONTACTS_PORT);
-            ::inet_pton(AF_INET, DISCORD_CONTACTS_HOST, &addr.sin_addr);
-
-            if (::connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0)
+            asio::io_context ioc;
+            tcp::socket sock(ioc);
+            tcp::endpoint ep(asio::ip::make_address(DISCORD_CONTACTS_HOST), DISCORD_CONTACTS_PORT);
+            boost::system::error_code ec;
+            sock.connect(ep, ec);
+            if (!ec)
             {
-                ::close(sock);
-                goto done;
-            }
+                const std::string req =
+                    "GET /contacts HTTP/1.1\r\n"
+                    "Host: 127.0.0.1:3002\r\n"
+                    "Connection: close\r\n"
+                    "\r\n";
+                asio::write(sock, asio::buffer(req), ec);
 
-            const std::string req =
-                "GET /contacts HTTP/1.1\r\n"
-                "Host: 127.0.0.1:3002\r\n"
-                "Connection: close\r\n"
-                "\r\n";
-            ::send(sock, req.c_str(), req.size(), 0);
+                // Read full response
+                std::string response;
+                char buf[4096];
+                std::size_t n;
+                while ((n = sock.read_some(asio::buffer(buf), ec)) > 0)
+                    response.append(buf, n);
 
-            // Read full response
-            std::string response;
-            char buf[4096];
-            ssize_t n;
-            while ((n = ::recv(sock, buf, sizeof(buf), 0)) > 0)
-                response.append(buf, n);
-            ::close(sock);
-
-            // Find body after double CRLF
-            std::size_t body_pos = response.find("\r\n\r\n");
-            if (body_pos == std::string::npos) goto done;
-            std::string body = response.substr(body_pos + 4);
-
-            // Skip chunked size line if present
-            if (!body.empty() && std::isxdigit((unsigned char)body[0]))
-            {
-                std::size_t lf = body.find('\n');
-                if (lf != std::string::npos) body = body.substr(lf + 1);
-            }
-
-            try
-            {
-                boost::json::value jv = boost::json::parse(body);
-                if (!jv.is_array()) goto done;
-                for (const auto& jc : jv.as_array())
+                // Find body after double CRLF
+                std::size_t body_pos = response.find("\r\n\r\n");
+                if (body_pos != std::string::npos)
                 {
-                    if (!jc.is_object()) continue;
-                    const auto& obj = jc.as_object();
-                    DiscordContact c;
-                    c.discord_id   = obj.contains("discord_id")   ? std::string(obj.at("discord_id").as_string())   : "";
-                    c.display_name = obj.contains("display_name")  ? std::string(obj.at("display_name").as_string()) : "";
-                    c.status       = obj.contains("status")        ? std::string(obj.at("status").as_string())       : "offline";
-                    c.server       = obj.contains("server")        ? std::string(obj.at("server").as_string())       : "";
-                    if (c.discord_id.empty()) continue;
-                    c.uuid = discordUUID(c.discord_id);
-                    result.push_back(c);
+                    std::string body = response.substr(body_pos + 4);
+
+                    // Skip chunked size line if present
+                    if (!body.empty() && std::isxdigit((unsigned char)body[0]))
+                    {
+                        std::size_t lf = body.find('\n');
+                        if (lf != std::string::npos) body = body.substr(lf + 1);
+                    }
+
+                    try
+                    {
+                        boost::json::value jv = boost::json::parse(body);
+                        if (jv.is_array())
+                        {
+                            for (const auto& jc : jv.as_array())
+                            {
+                                if (!jc.is_object()) continue;
+                                const auto& obj = jc.as_object();
+                                DiscordContact c;
+                                c.discord_id   = obj.contains("discord_id")   ? std::string(obj.at("discord_id").as_string())   : "";
+                                c.display_name = obj.contains("display_name")  ? std::string(obj.at("display_name").as_string()) : "";
+                                c.status       = obj.contains("status")        ? std::string(obj.at("status").as_string())       : "offline";
+                                c.server       = obj.contains("server")        ? std::string(obj.at("server").as_string())       : "";
+                                if (c.discord_id.empty()) continue;
+                                c.uuid = discordUUID(c.discord_id);
+                                result.push_back(c);
+                            }
+                        }
+                    }
+                    catch (...) {}
                 }
             }
-            catch (...) {}
         }
+        catch (...) {}
 
-    done:
         std::lock_guard<std::mutex> lk(mPendingMutex);
         mPending      = std::move(result);
         mPendingReady = true;

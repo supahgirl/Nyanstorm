@@ -40,12 +40,7 @@
 #include <cstring>
 #include <sstream>
 #include <set>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netdb.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <poll.h>
+#include <boost/asio.hpp>
 
 #include <curl/curl.h>
 #include <boost/algorithm/string.hpp>
@@ -169,22 +164,25 @@ void FSDiscordGateway::stop()
 {
     mRunning.store(false);
 
-    // Shutdown HTTP server socket to wake poll() safely, then close
-    if (mHttpServerFd >= 0)
+    // Close the ASIO acceptor to wake the blocking accept() in the HTTP server thread
+    if (mHttpAcceptor && mHttpAcceptor->is_open())
     {
-        ::shutdown(mHttpServerFd, SHUT_RDWR);
-        ::close(mHttpServerFd);
-        mHttpServerFd = -1;
+        boost::system::error_code ec;
+        mHttpAcceptor->close(ec);
     }
 
     // Close the Gateway socket to interrupt blocking ws.read()
-    if (mGatewaySocketFd.load() >= 0)
     {
-        int fd = mGatewaySocketFd.exchange(-1);
-        if (fd >= 0)
+        auto fd = mGatewaySocketFd.exchange(
+            boost::asio::ip::tcp::socket::native_handle_type(-1));
+        if (fd != boost::asio::ip::tcp::socket::native_handle_type(-1))
         {
-            ::shutdown(fd, SHUT_RDWR);
-            ::close(fd);
+            // Use a temporary socket to close the native handle portably
+            boost::asio::io_context tmp_ioc;
+            boost::asio::ip::tcp::socket tmp_sock(tmp_ioc);
+            boost::system::error_code ec;
+            tmp_sock.assign(boost::asio::ip::tcp::v4(), fd, ec);
+            if (!ec) tmp_sock.close(ec);
         }
     }
 
@@ -645,13 +643,13 @@ bool FSDiscordGateway::connectGateway()
         // Try clean close (ignore error if already closed)
         beast::error_code close_ec;
         ws.close(websocket::close_code::normal, close_ec);
-        mGatewaySocketFd.store(-1);
+        mGatewaySocketFd.store(boost::asio::ip::tcp::socket::native_handle_type(-1));
         return false; // will trigger reconnect
     }
     catch (const std::exception& e)
     {
         LL_WARNS("DiscordGateway") << "Gateway connection error: " << e.what() << LL_ENDL;
-        mGatewaySocketFd.store(-1);
+        mGatewaySocketFd.store(boost::asio::ip::tcp::socket::native_handle_type(-1));
         return false;
     }
 }
@@ -1335,69 +1333,45 @@ void FSDiscordGateway::httpServerThreadFunc()
 
     try
     {
-    int server_fd = ::socket(AF_INET, SOCK_STREAM, 0);
-    if (server_fd < 0)
-    {
-        LL_WARNS("DiscordGateway") << "Failed to create HTTP server socket" << LL_ENDL;
-        return;
-    }
+    namespace asio = boost::asio;
+    using tcp = asio::ip::tcp;
 
-    // Allow immediate reuse of the address
-    int reuse = 1;
-    ::setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+    mHttpIoc = std::make_unique<asio::io_context>();
+    mHttpAcceptor = std::make_unique<tcp::acceptor>(*mHttpIoc);
 
-    struct sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port   = htons(HTTP_PORT);
-    ::inet_pton(AF_INET, HTTP_HOST, &addr.sin_addr);
+    tcp::endpoint endpoint(asio::ip::make_address(HTTP_HOST), HTTP_PORT);
+    mHttpAcceptor->open(endpoint.protocol());
+    mHttpAcceptor->set_option(tcp::acceptor::reuse_address(true));
+    mHttpAcceptor->bind(endpoint);
+    mHttpAcceptor->listen(10);
 
-    if (::bind(server_fd, (struct sockaddr*)&addr, sizeof(addr)) < 0)
-    {
-        LL_WARNS("DiscordGateway") << "Failed to bind HTTP server to port " << HTTP_PORT << LL_ENDL;
-        ::close(server_fd);
-        return;
-    }
-
-    if (::listen(server_fd, 10) < 0)
-    {
-        LL_WARNS("DiscordGateway") << "Failed to listen on HTTP server socket" << LL_ENDL;
-        ::close(server_fd);
-        return;
-    }
-
-    mHttpServerFd = server_fd;
     GWLOG("Internal HTTP server listening on %s:%d", HTTP_HOST, HTTP_PORT);
     LL_INFOS("DiscordGateway") << "Internal HTTP server listening on "
                                << HTTP_HOST << ":" << HTTP_PORT << LL_ENDL;
 
     while (mRunning.load())
     {
-        struct pollfd pfd;
-        pfd.fd     = server_fd;
-        pfd.events = POLLIN;
+        boost::system::error_code accept_ec;
+        tcp::socket client_sock(*mHttpIoc);
+        mHttpAcceptor->accept(client_sock, accept_ec);
+        if (accept_ec)
+        {
+            // acceptor was closed (stop() was called) or transient error
+            break;
+        }
 
-        int ret = ::poll(&pfd, 1, 1000); // 1s timeout to check mRunning
-        if (ret < 0) break;
-        if (ret == 0) continue;
-
-        struct sockaddr_in client_addr{};
-        socklen_t client_len = sizeof(client_addr);
-        int client_fd = ::accept(server_fd, (struct sockaddr*)&client_addr, &client_len);
-        if (client_fd < 0) continue;
-
-        // Set a 5-second receive timeout
-        struct timeval tv;
-        tv.tv_sec  = 5;
-        tv.tv_usec = 0;
-        ::setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        // Set a 5-second receive timeout (Boost.ASIO 1.75+)
+        client_sock.set_option(
+            asio::socket_base::receive_timeout(std::chrono::seconds(5)), accept_ec);
 
         // Read the full HTTP request (loop to reassemble fragmented TCP)
         std::string request;
         char buf[4096];
         while (true)
         {
-            ssize_t n = ::recv(client_fd, buf, sizeof(buf) - 1, 0);
-            if (n <= 0) break;
+            boost::system::error_code read_ec;
+            std::size_t n = client_sock.read_some(asio::buffer(buf, sizeof(buf) - 1), read_ec);
+            if (read_ec || n == 0) break;
             buf[n] = '\0';
             request.append(buf, n);
 
@@ -1422,15 +1396,15 @@ void FSDiscordGateway::httpServerThreadFunc()
             }
         }
 
-        if (request.empty()) { ::close(client_fd); continue; }
+        if (request.empty()) { continue; }
 
-        handleHttpRequest(client_fd, request);
+        handleHttpRequest(client_sock, request);
     }
 
-    if (server_fd >= 0)
+    if (mHttpAcceptor && mHttpAcceptor->is_open())
     {
-        ::close(server_fd);
-        mHttpServerFd = -1;
+        boost::system::error_code ec;
+        mHttpAcceptor->close(ec);
     }
 
     LL_INFOS("DiscordGateway") << "Internal HTTP server stopped" << LL_ENDL;
@@ -1441,7 +1415,7 @@ void FSDiscordGateway::httpServerThreadFunc()
     }
 }
 
-void FSDiscordGateway::handleHttpRequest(int client_fd, const std::string& request)
+void FSDiscordGateway::handleHttpRequest(boost::asio::ip::tcp::socket& client_sock, const std::string& request)
 {
     // Parse the first line: METHOD PATH HTTP/1.1
     std::istringstream iss(request);
@@ -1450,16 +1424,15 @@ void FSDiscordGateway::handleHttpRequest(int client_fd, const std::string& reque
 
     if (method == "GET" && path == "/events")
     {
-        // SSE is persistent — spawn a thread so the HTTP server can
-        // handle other requests (contacts, send, typing, etc.)
-        int sse_fd = client_fd;
-        std::thread([this, sse_fd]()
+        // SSE is persistent — move the socket into a dedicated thread so the
+        // HTTP server can handle other requests (contacts, send, typing, etc.)
+        std::thread([this, sock = std::move(client_sock)]() mutable
         {
             try
             {
-                GWLOG("SSE handler thread started for fd=%d", sse_fd);
-                serveSSE(sse_fd);
-                GWLOG("SSE handler thread ended for fd=%d", sse_fd);
+                GWLOG("SSE handler thread started");
+                serveSSE(std::move(sock));
+                GWLOG("SSE handler thread ended");
             }
             catch (const std::exception& e)
             {
@@ -1490,7 +1463,7 @@ void FSDiscordGateway::handleHttpRequest(int client_fd, const std::string& reque
         std::string body = boost::json::serialize(arr);
         GWLOG("GET /contacts returning %zu contacts, body size=%zu",
               contacts.size(), body.size());
-        sendHttpResponse(client_fd, 200, "application/json", body);
+        sendHttpResponse(client_sock, 200, "application/json", body);
         return;
     }
 
@@ -1519,7 +1492,7 @@ void FSDiscordGateway::handleHttpRequest(int client_fd, const std::string& reque
             }
             catch (...) {}
         }
-        sendHttpResponse(client_fd, 200, "application/json", "{\"ok\":true}");
+        sendHttpResponse(client_sock, 200, "application/json", "{\"ok\":true}");
         return;
     }
 
@@ -1547,7 +1520,7 @@ void FSDiscordGateway::handleHttpRequest(int client_fd, const std::string& reque
             }
             catch (...) {}
         }
-        sendHttpResponse(client_fd, 200, "application/json", "{\"ok\":true}");
+        sendHttpResponse(client_sock, 200, "application/json", "{\"ok\":true}");
         return;
     }
 
@@ -1570,7 +1543,7 @@ void FSDiscordGateway::handleHttpRequest(int client_fd, const std::string& reque
             }
             catch (...) {}
         }
-        sendHttpResponse(client_fd, 200, "application/json", "{\"ok\":true}");
+        sendHttpResponse(client_sock, 200, "application/json", "{\"ok\":true}");
         return;
     }
 
@@ -1593,7 +1566,7 @@ void FSDiscordGateway::handleHttpRequest(int client_fd, const std::string& reque
             }
             catch (...) {}
         }
-        sendHttpResponse(client_fd, 200, "application/json", "{\"ok\":true}");
+        sendHttpResponse(client_sock, 200, "application/json", "{\"ok\":true}");
         return;
     }
 
@@ -1615,7 +1588,7 @@ void FSDiscordGateway::handleHttpRequest(int client_fd, const std::string& reque
             }
             catch (...) {}
         }
-        sendHttpResponse(client_fd, 200, "application/json", "{\"ok\":true}");
+        sendHttpResponse(client_sock, 200, "application/json", "{\"ok\":true}");
         return;
     }
 
@@ -1624,16 +1597,18 @@ void FSDiscordGateway::handleHttpRequest(int client_fd, const std::string& reque
         boost::json::object status;
         status["state"] = (int)mState.load();
         status["connected"] = (mState.load() == STATE_CONNECTED);
-        sendHttpResponse(client_fd, 200, "application/json", boost::json::serialize(status));
+        sendHttpResponse(client_sock, 200, "application/json", boost::json::serialize(status));
         return;
     }
 
     // Fallback: 404
-    sendHttpResponse(client_fd, 404, "text/plain", "Not Found");
+    sendHttpResponse(client_sock, 404, "text/plain", "Not Found");
 }
 
-void FSDiscordGateway::serveSSE(int client_fd)
+void FSDiscordGateway::serveSSE(boost::asio::ip::tcp::socket client_sock)
 {
+    namespace asio = boost::asio;
+
     // Send SSE headers
     std::string header =
         "HTTP/1.1 200 OK\r\n"
@@ -1643,19 +1618,19 @@ void FSDiscordGateway::serveSSE(int client_fd)
         "X-Accel-Buffering: no\r\n"
         "Access-Control-Allow-Origin: *\r\n"
         "\r\n";
-    if (::send(client_fd, header.c_str(), header.size(), 0) < 0)
+    boost::system::error_code ec;
+    asio::write(client_sock, asio::buffer(header), ec);
+    if (ec)
     {
-        ::close(client_fd);
+        // socket closed before we could send headers
         return;
     }
 
     LL_INFOS("DiscordGateway") << "SSE client connected" << LL_ENDL;
 
-    // Set send timeout
-    struct timeval tv;
-    tv.tv_sec  = 30;
-    tv.tv_usec = 0;
-    ::setsockopt(client_fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    // Set send timeout (30 s) so a dead client doesn't block the thread forever
+    client_sock.set_option(
+        asio::socket_base::send_timeout(std::chrono::seconds(30)), ec);
 
     while (true)
     {
@@ -1677,9 +1652,9 @@ void FSDiscordGateway::serveSSE(int client_fd)
                 // Wait with timeout for keepalive
                 if (mSSECV.wait_for(lk, std::chrono::seconds(25)) == std::cv_status::timeout)
                 {
-                    const char* ka = ": keepalive\n\n";
-                    if (::send(client_fd, ka, strlen(ka), 0) < 0)
-                        break;
+                    const std::string ka = ": keepalive\n\n";
+                    asio::write(client_sock, asio::buffer(ka), ec);
+                    if (ec) break;
                     continue;
                 }
                 // Woke up — check for events or shutdown
@@ -1703,16 +1678,16 @@ void FSDiscordGateway::serveSSE(int client_fd)
         if (have_event)
         {
             std::string data = "data: " + boost::json::serialize(event) + "\n\n";
-            if (::send(client_fd, data.c_str(), data.size(), 0) < 0)
-                break;
+            asio::write(client_sock, asio::buffer(data), ec);
+            if (ec) break;
         }
     }
 
-    ::close(client_fd);
+    client_sock.close(ec);
     LL_INFOS("DiscordGateway") << "SSE client disconnected" << LL_ENDL;
 }
 
-void FSDiscordGateway::sendHttpResponse(int client_fd, int status,
+void FSDiscordGateway::sendHttpResponse(boost::asio::ip::tcp::socket& client_sock, int status,
                                         const std::string& content_type,
                                         const std::string& body, bool keep_alive)
 {
@@ -1728,7 +1703,8 @@ void FSDiscordGateway::sendHttpResponse(int client_fd, int status,
          << body;
 
     std::string resp_str = resp.str();
-    ::send(client_fd, resp_str.c_str(), resp_str.size(), 0);
+    boost::system::error_code ec;
+    boost::asio::write(client_sock, boost::asio::buffer(resp_str), ec);
     if (!keep_alive)
-        ::close(client_fd);
+        client_sock.close(ec);
 }

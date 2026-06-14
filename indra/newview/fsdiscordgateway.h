@@ -168,9 +168,10 @@ private:
 
     // ── Internal HTTP server ────────────────────────────────────────────
 
-    void handleHttpRequest(int client_fd, const std::string& request);
-    void serveSSE(int client_fd);
-    void sendHttpResponse(int client_fd, int status, const std::string& content_type,
+    void handleHttpRequest(boost::asio::ip::tcp::socket& client_sock, const std::string& request);
+    void serveSSE(boost::asio::ip::tcp::socket client_sock);
+    void sendHttpResponse(boost::asio::ip::tcp::socket& client_sock, int status,
+                          const std::string& content_type,
                           const std::string& body, bool keep_alive = false);
 
     // ── Shared helpers ──────────────────────────────────────────────────
@@ -188,7 +189,9 @@ private:
     GatewaySessionInfo mSession;
 
     // Used to shutdown the blocking ws.read() on viewer quit
-    std::atomic<int> mGatewaySocketFd{-1};
+    // Stores the native socket handle (SOCKET on Windows, int on POSIX)
+    std::atomic<boost::asio::ip::tcp::socket::native_handle_type> mGatewaySocketFd{
+        boost::asio::ip::tcp::socket::native_handle_type(-1)};
 
     // Heartbeat
     std::chrono::milliseconds mHeartbeatInterval{41250};
@@ -229,8 +232,9 @@ private:
     std::condition_variable mSSECV;
 
     // HTTP server
-    std::unique_ptr<std::thread> mHttpServerThread;
-    int mHttpServerFd = -1;  // listening socket fd
+    std::unique_ptr<std::thread>              mHttpServerThread;
+    std::unique_ptr<boost::asio::io_context>  mHttpIoc;
+    std::unique_ptr<boost::asio::ip::tcp::acceptor> mHttpAcceptor;
 };
 
 #endif // FS_FSDISCORDGATEWAY_H

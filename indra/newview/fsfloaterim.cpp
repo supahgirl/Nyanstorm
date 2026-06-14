@@ -132,10 +132,7 @@ static std::string sPendingMessage;
 // to the main thread via LLEventPumps ("MCPTokenStream").
 
 #include <thread>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
+#include <boost/asio.hpp>
 
 static const std::string MCP_STREAM_HOST = "127.0.0.1";
 static const int         MCP_STREAM_PORT = 3000;
@@ -391,96 +388,106 @@ static void queueDiscordMessage(const LLUUID& uuid, const std::string& display_n
 // Persistent background thread — reconnects every 5s on failure
 static void discordListenerThreadFunc()
 {
+	namespace asio = boost::asio;
+	using tcp = asio::ip::tcp;
+
 	while (true)
 	{
-		int sock = ::socket(AF_INET, SOCK_STREAM, 0);
-		if (sock < 0) { std::this_thread::sleep_for(std::chrono::seconds(5)); continue; }
-
-		struct sockaddr_in addr{};
-		addr.sin_family = AF_INET;
-		addr.sin_port   = htons(DISCORD_RELAY_PORT);
-		::inet_pton(AF_INET, DISCORD_RELAY_HOST, &addr.sin_addr);
-
-		if (::connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0)
+		try
 		{
-			::close(sock);
-			std::this_thread::sleep_for(std::chrono::seconds(5));
-			continue;
-		}
-
-		std::string request =
-			"GET /events HTTP/1.1\r\n"
-			"Host: 127.0.0.1:3002\r\n"
-			"Accept: text/event-stream\r\n"
-			"Cache-Control: no-cache\r\n"
-			"Connection: keep-alive\r\n"
-			"\r\n";
-		::send(sock, request.c_str(), request.size(), 0);
-
-		std::string line_buf;
-		bool in_headers = true;
-		char ch;
-
-		while (::recv(sock, &ch, 1, 0) == 1)
-		{
-			if (ch != '\n') { if (ch != '\r') line_buf += ch; continue; }
-			std::string line = line_buf;
-			line_buf.clear();
-
-			if (in_headers) { if (line.empty()) in_headers = false; continue; }
-			if (line.rfind("data: ", 0) != 0) continue;
-
-			std::string payload = line.substr(6);
-			if (payload.empty() || payload[0] == ':') continue; // keepalive
-
-			try
+			asio::io_context ioc;
+			tcp::socket sock(ioc);
+			tcp::endpoint ep(asio::ip::make_address(DISCORD_RELAY_HOST), DISCORD_RELAY_PORT);
+			boost::system::error_code ec;
+			sock.connect(ep, ec);
+			if (ec)
 			{
-				boost::json::value val = boost::json::parse(payload);
-				if (!val.is_object()) continue;
-				auto& obj = val.as_object();
+				std::this_thread::sleep_for(std::chrono::seconds(5));
+				continue;
+			}
 
-				// Status update from relay
-				if (obj.contains("status_update"))
-				{
-					std::string status = obj["status_update"].as_string().c_str();
-					discordUpdateStatusFromRelay(status);
-					continue;
-				}
+			std::string request =
+				"GET /events HTTP/1.1\r\n"
+				"Host: 127.0.0.1:3002\r\n"
+				"Accept: text/event-stream\r\n"
+				"Cache-Control: no-cache\r\n"
+				"Connection: keep-alive\r\n"
+				"\r\n";
+			asio::write(sock, asio::buffer(request), ec);
+			if (ec)
+			{
+				std::this_thread::sleep_for(std::chrono::seconds(3));
+				continue;
+			}
 
-				// Typing indicator from relay
-				if (obj.contains("typing") && obj.contains("session_uuid"))
+			std::string line_buf;
+			bool in_headers = true;
+			char ch;
+
+			while (true)
+			{
+				std::size_t n = sock.read_some(asio::buffer(&ch, 1), ec);
+				if (ec || n == 0) break;
+
+				if (ch != '\n') { if (ch != '\r') line_buf += ch; continue; }
+				std::string line = line_buf;
+				line_buf.clear();
+
+				if (in_headers) { if (line.empty()) in_headers = false; continue; }
+				if (line.rfind("data: ", 0) != 0) continue;
+
+				std::string payload = line.substr(6);
+				if (payload.empty() || payload[0] == ':') continue; // keepalive
+
+				try
 				{
-					bool typing_val = obj["typing"].as_bool();
-					std::string uuid_str = obj["session_uuid"].as_string().c_str();
-					std::string author;
-					if (obj.contains("author_name"))
-						author = obj["author_name"].as_string().c_str();
+					boost::json::value val = boost::json::parse(payload);
+					if (!val.is_object()) continue;
+					auto& obj = val.as_object();
+
+					// Status update from relay
+					if (obj.contains("status_update"))
+					{
+						std::string status = obj["status_update"].as_string().c_str();
+						discordUpdateStatusFromRelay(status);
+						continue;
+					}
+
+					// Typing indicator from relay
+					if (obj.contains("typing") && obj.contains("session_uuid"))
+					{
+						bool typing_val = obj["typing"].as_bool();
+						std::string uuid_str = obj["session_uuid"].as_string().c_str();
+						std::string author;
+						if (obj.contains("author_name"))
+							author = obj["author_name"].as_string().c_str();
+						LLUUID session_uuid;
+						session_uuid.set(uuid_str);
+						std::lock_guard<std::mutex> lk(sDiscordTypingMutex);
+						sDiscordTypingQueue.push_back({session_uuid, typing_val, author});
+						continue;
+					}
+
+					if (!obj.contains("session_uuid") || !obj.contains("display_name") || !obj.contains("text")) continue;
+
+					std::string uuid_str     = obj["session_uuid"].as_string().c_str();
+					std::string display_name = obj["display_name"].as_string().c_str();
+					std::string text         = obj["text"].as_string().c_str();
+					std::string author_name;
+					std::string author_discord_id;
+					if (obj.contains("author_name"))       author_name       = obj["author_name"].as_string().c_str();
+					if (obj.contains("author_discord_id")) author_discord_id = obj["author_discord_id"].as_string().c_str();
+
 					LLUUID session_uuid;
 					session_uuid.set(uuid_str);
-					std::lock_guard<std::mutex> lk(sDiscordTypingMutex);
-					sDiscordTypingQueue.push_back({session_uuid, typing_val, author});
-					continue;
+
+					queueDiscordMessage(session_uuid, display_name, text, author_name, author_discord_id);
 				}
-
-				if (!obj.contains("session_uuid") || !obj.contains("display_name") || !obj.contains("text")) continue;
-
-				std::string uuid_str     = obj["session_uuid"].as_string().c_str();
-				std::string display_name = obj["display_name"].as_string().c_str();
-				std::string text         = obj["text"].as_string().c_str();
-				std::string author_name;
-				std::string author_discord_id;
-				if (obj.contains("author_name"))       author_name       = obj["author_name"].as_string().c_str();
-				if (obj.contains("author_discord_id")) author_discord_id = obj["author_discord_id"].as_string().c_str();
-
-				LLUUID session_uuid;
-				session_uuid.set(uuid_str);
-
-				queueDiscordMessage(session_uuid, display_name, text, author_name, author_discord_id);
+				catch (...) {}
 			}
-			catch (...) {}
 		}
+		catch (...) {}
 
-		::close(sock);
 		std::this_thread::sleep_for(std::chrono::seconds(3));
 	}
 }
@@ -497,31 +504,34 @@ static void sendDiscordMessage(const LLUUID& session_uuid, const std::string& te
 
 	std::thread([relay_uuid, text]()
 	{
+		namespace asio = boost::asio;
+		using tcp = asio::ip::tcp;
+
 		boost::json::object body;
 		body["session_uuid"] = relay_uuid.asString();
 		body["text"]         = text;
 		std::string json_body = boost::json::serialize(body);
 
-		int sock = ::socket(AF_INET, SOCK_STREAM, 0);
-		if (sock < 0) return;
+		try
+		{
+			asio::io_context ioc;
+			tcp::socket sock(ioc);
+			tcp::endpoint ep(asio::ip::make_address(DISCORD_RELAY_HOST), DISCORD_RELAY_PORT);
+			boost::system::error_code ec;
+			sock.connect(ep, ec);
+			if (ec) return;
 
-		struct sockaddr_in addr{};
-		addr.sin_family = AF_INET;
-		addr.sin_port   = htons(DISCORD_RELAY_PORT);
-		::inet_pton(AF_INET, DISCORD_RELAY_HOST, &addr.sin_addr);
+			std::string request =
+				"POST /send HTTP/1.1\r\n"
+				"Host: 127.0.0.1:3002\r\n"
+				"Content-Type: application/json\r\n"
+				"Connection: close\r\n"
+				"Content-Length: " + std::to_string(json_body.size()) + "\r\n"
+				"\r\n" + json_body;
 
-		if (::connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) { ::close(sock); return; }
-
-		std::string request =
-			"POST /send HTTP/1.1\r\n"
-			"Host: 127.0.0.1:3002\r\n"
-			"Content-Type: application/json\r\n"
-			"Connection: close\r\n"
-			"Content-Length: " + std::to_string(json_body.size()) + "\r\n"
-			"\r\n" + json_body;
-
-		::send(sock, request.c_str(), request.size(), 0);
-		::close(sock);
+			asio::write(sock, asio::buffer(request), ec);
+		}
+		catch (...) {}
 	}).detach();
 }
 
@@ -536,37 +546,36 @@ static void sendDiscordTyping(const LLUUID& session_uuid, bool typing)
 
 	std::thread([relay_uuid, typing]()
 	{
+		namespace asio = boost::asio;
+		using tcp = asio::ip::tcp;
+
 		boost::json::object body;
 		body["session_uuid"] = relay_uuid.asString();
 		body["typing"]       = typing;
 		std::string json_body = boost::json::serialize(body);
 
-		int sock = ::socket(AF_INET, SOCK_STREAM, 0);
-		if (sock < 0) return;
+		try
+		{
+			asio::io_context ioc;
+			tcp::socket sock(ioc);
+			tcp::endpoint ep(asio::ip::make_address(DISCORD_RELAY_HOST), DISCORD_RELAY_PORT);
+			boost::system::error_code ec;
+			sock.connect(ep, ec);
+			if (ec) return;
+			// Set a 1-second send timeout to avoid thread accumulation
+			sock.set_option(asio::socket_base::send_timeout(std::chrono::seconds(1)), ec);
 
-		// Set a 1-second connect timeout to avoid thread accumulation
-		struct timeval tv;
-		tv.tv_sec  = 1;
-		tv.tv_usec = 0;
-		::setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+			std::string request =
+				"POST /typing HTTP/1.1\r\n"
+				"Host: 127.0.0.1:3002\r\n"
+				"Content-Type: application/json\r\n"
+				"Connection: close\r\n"
+				"Content-Length: " + std::to_string(json_body.size()) + "\r\n"
+				"\r\n" + json_body;
 
-		struct sockaddr_in addr{};
-		addr.sin_family = AF_INET;
-		addr.sin_port   = htons(DISCORD_RELAY_PORT);
-		::inet_pton(AF_INET, DISCORD_RELAY_HOST, &addr.sin_addr);
-
-		if (::connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) { ::close(sock); return; }
-
-		std::string request =
-			"POST /typing HTTP/1.1\r\n"
-			"Host: 127.0.0.1:3002\r\n"
-			"Content-Type: application/json\r\n"
-			"Connection: close\r\n"
-			"Content-Length: " + std::to_string(json_body.size()) + "\r\n"
-			"\r\n" + json_body;
-
-		::send(sock, request.c_str(), request.size(), 0);
-		::close(sock);
+			asio::write(sock, asio::buffer(request), ec);
+		}
+		catch (...) {}
 	}).detach();
 }
 
