@@ -1,6 +1,6 @@
 # Nyanstorm — Firestorm viewer fork
 
-Firestorm fork with AI agent chat, Discord integration, AO enhancements, avatar height detection, gender-based avatar coloring, and RLV (nostrip) link protection. Based on Firestorm 7.2.4.
+Firestorm fork with AI agent chat, Discord integration, AO enhancements, avatar height detection, gender-based avatar coloring, RLV (nostrip) link protection, and Windows-compatible networking. Based on Firestorm 7.2.4.
 
 ---
 
@@ -77,10 +77,17 @@ A built-in Discord chat bridge replaces the old external Python relay. It uses t
 - **Channel messages with author names** — messages from Discord channels show the author's display name
 
 **How to use:**
-1. Create a Discord bot at https://discord.com/developers/applications and copy its token
-2. Open the Debug Settings floater (**Ctrl+Shift+D**) and set `FSDiscordBotToken` to your bot token
-3. Restart the viewer — the Gateway connects automatically on login
-4. Discord contacts appear in the Contacts floater under the Discord tab
+
+1. Open **Discord in a web browser** at https://discord.com/app
+2. Press **F12** (or **Ctrl+Shift+I**) to open Developer Tools
+3. Click the **Network** tab, then type anything in a Discord DM or channel and send it
+4. In the Network tab, find any request to `discord.com/api` — use the **Filter** box (top-left of the Network panel) and type `api`
+5. Click the request, scroll to **Request Headers**, and copy the full value of the `Authorization` header
+6. In Firestorm, open the Debug Settings floater (**Ctrl+Shift+D**) and paste it into `FSDiscordBotToken`
+7. Restart the viewer — the Gateway connects automatically on login
+8. Discord friends appear in the Contacts floater under the Discord tab
+
+> **Note:** Your token may expire if you change your Discord password. If the bridge stops working, repeat the steps above to get a fresh token.
 
 ### Animation Overrider Enhancements
 
@@ -116,6 +123,10 @@ The standard RLV `(nostrip)` folder protection is extended to work correctly wit
 
 This matches the expected behaviour described in the RLV specification.
 
+### Windows Compatibility
+
+All networking code uses **Boost.ASIO** instead of raw POSIX sockets. This means the viewer compiles and runs on Windows without modification — no Winsock2 workarounds or platform guards needed.
+
 ### Gender-Based Avatar Coloring
 
 Avatars in the Radar, Minimap, and Nearby list are color-coded by detected gender:
@@ -134,7 +145,7 @@ Toggle this in the Debug Settings: `FSColorAvatarsByGender` (Boolean). Contact-s
 | `FSAIAgentName2` | String | *empty* | Display name for AI Agent 2 |
 | `FSAIContextSizeK` | S32 | `0` | LLM context size in kilo-tokens (0 = model default) |
 | `FSModelProviderConfigs` | LLSD | *empty* | Saved provider list (managed via **Configure > LLM**) |
-| `FSDiscordBotToken` | String | *empty* | Discord bot token for the built-in chat Gateway |
+| `FSDiscordBotToken` | String | *empty* | Discord user token for the built-in chat Gateway (see Discord Integration above) |
 | `FSEnableDiscordIntegration` | Boolean | — | Per-account toggle for Discord Gateway (set automatically) |
 | `FSColorAvatarsByGender` | Boolean | `1` | Color avatars by gender in Radar/Minimap/Nearby |
 
