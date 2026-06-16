@@ -186,9 +186,7 @@
 #include "llvovolume.h"
 #include "particleeditor.h"
 #include "permissionstracker.h"
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
+#include <boost/asio.hpp>
 #include "fsfloaterimcontainer.h"
 #include "fschathistory.h"
 #include <boost/json.hpp>
@@ -12676,15 +12674,12 @@ static void discord_send_status(const std::string& status)
         body["status"] = status;
         std::string json_body = boost::json::serialize(body);
 
-        int sock = ::socket(AF_INET, SOCK_STREAM, 0);
-        if (sock < 0) return;
-
-        struct sockaddr_in addr{};
-        addr.sin_family = AF_INET;
-        addr.sin_port   = htons(3002);
-        ::inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
-
-        if (::connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) { ::close(sock); return; }
+        using boost::asio::ip::tcp;
+        boost::asio::io_context ioc;
+        tcp::socket sock(ioc);
+        boost::system::error_code ec;
+        sock.connect(tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), 3002), ec);
+        if (ec) return;
 
         std::string request =
             "POST /discord_status HTTP/1.1\r\n"
@@ -12694,8 +12689,8 @@ static void discord_send_status(const std::string& status)
             "Content-Length: " + std::to_string(json_body.size()) + "\r\n"
             "\r\n" + json_body;
 
-        ::send(sock, request.c_str(), request.size(), 0);
-        ::close(sock);
+        boost::asio::write(sock, boost::asio::buffer(request), ec);
+        sock.close(ec);
     }).detach();
 }
 
