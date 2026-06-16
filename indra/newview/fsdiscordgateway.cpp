@@ -174,8 +174,8 @@ void FSDiscordGateway::stop()
     // Close the Gateway socket to interrupt blocking ws.read()
     {
         auto fd = mGatewaySocketFd.exchange(
-            boost::asio::ip::tcp::socket::native_handle_type(-1));
-        if (fd != boost::asio::ip::tcp::socket::native_handle_type(-1))
+            static_cast<intptr_t>(-1));
+        if (fd != static_cast<intptr_t>(-1))
         {
             // Use a temporary socket to close the native handle portably
             boost::asio::io_context tmp_ioc;
@@ -485,7 +485,7 @@ bool FSDiscordGateway::connectGateway()
         ws.handshake(GATEWAY_URL, GATEWAY_PATH);
 
         // Store the native socket so stop() can interrupt the blocking read
-        mGatewaySocketFd.store(beast::get_lowest_layer(ws).socket().native_handle());
+        mGatewaySocketFd.store(static_cast<intptr_t>(beast::get_lowest_layer(ws).socket().native_handle()));
 
         mState.store(STATE_CONNECTED);
 
@@ -643,13 +643,13 @@ bool FSDiscordGateway::connectGateway()
         // Try clean close (ignore error if already closed)
         beast::error_code close_ec;
         ws.close(websocket::close_code::normal, close_ec);
-        mGatewaySocketFd.store(boost::asio::ip::tcp::socket::native_handle_type(-1));
+        mGatewaySocketFd.store(static_cast<intptr_t>(-1));
         return false; // will trigger reconnect
     }
     catch (const std::exception& e)
     {
         LL_WARNS("DiscordGateway") << "Gateway connection error: " << e.what() << LL_ENDL;
-        mGatewaySocketFd.store(boost::asio::ip::tcp::socket::native_handle_type(-1));
+        mGatewaySocketFd.store(static_cast<intptr_t>(-1));
         return false;
     }
 }

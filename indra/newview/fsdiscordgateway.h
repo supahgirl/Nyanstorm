@@ -189,9 +189,8 @@ private:
     GatewaySessionInfo mSession;
 
     // Used to shutdown the blocking ws.read() on viewer quit
-    // Stores the native socket handle (SOCKET on Windows, int on POSIX)
-    std::atomic<boost::asio::ip::tcp::socket::native_handle_type> mGatewaySocketFd{
-        boost::asio::ip::tcp::socket::native_handle_type(-1)};
+    // Stored as intptr_t for atomic compatibility across platforms (SOCKET on Windows, int on POSIX)
+    std::atomic<intptr_t> mGatewaySocketFd{-1};
 
     // Heartbeat
     std::chrono::milliseconds mHeartbeatInterval{41250};

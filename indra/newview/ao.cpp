@@ -890,8 +890,8 @@ void FloaterAO::localPreviewAdjacent(bool next)
     }
     if (idx < 0) return;
 
-    S32 new_idx = next ? (idx + 1) % anims.size()
-                       : (idx - 1 + anims.size()) % anims.size();
+    S32 new_idx = next ? (idx + 1) % (S32)anims.size()
+                       : (idx - 1 + (S32)anims.size()) % (S32)anims.size();
 
     localPreview(anims[new_idx].mAssetUUID);
 }
