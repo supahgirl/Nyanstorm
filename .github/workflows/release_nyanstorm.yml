@@ -11,6 +11,9 @@ on:
         required: true
         type: string
 
+permissions:
+  contents: write
+
 env:
   AUTOBUILD_VARIABLES_FILE: ${{ github.workspace }}/build-variables/variables
   BUILD_VERSION: ${{ github.event.inputs.version || github.ref_name }}
