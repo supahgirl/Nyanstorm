@@ -162,10 +162,14 @@ jobs:
           echo "$(brew --prefix)/opt/gnu-sed/libexec/gnubin" >> $GITHUB_PATH
         shell: bash
 
-      - name: Install llbase for system Python (macOS)
+      - name: Pin PYTHON for CMake and ensure llbase is installed
         run: |
-          /usr/bin/python3 -m pip install llbase llsd --break-system-packages 2>/dev/null || \
-          /usr/bin/python3 -m pip install llbase llsd
+          # CMake's Python.cmake checks $ENV{PYTHON} first — pin it to the
+          # python3 already on PATH (which already has llbase/llsd from requirements.txt)
+          # so the Xcode PostBuild script uses the same interpreter.
+          PYTHON_PATH=$(which python3)
+          echo "PYTHON=$PYTHON_PATH" >> $GITHUB_ENV
+          "$PYTHON_PATH" -m pip install llbase llsd
         shell: bash
 
       - name: Configure
