@@ -1230,7 +1230,7 @@ void FSDiscordGateway::refreshContactCache()
         }
         else
         {
-            GWLOG("refreshContactCache: friends response is not an array (type=%d)", jv.kind());
+            GWLOG("refreshContactCache: friends response is not an array (type=%d)", static_cast<int>(jv.kind()));
         }
     }
     catch (const std::exception& e)
