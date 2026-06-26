@@ -2036,16 +2036,20 @@ LLColor4 LLNetMap::getAvatarColor(const LLUUID& avatar_id)
     }
     else if (color == map_avatar_color)
     {
-        LLVOAvatar* avVo = static_cast<LLVOAvatar*>(gObjectList.findObject(avatar_id));
-        if (avVo)
+        static LLCachedControl<bool> colorByGender(gSavedSettings, "FSColorAvatarsByGender");
+        if (colorByGender)
         {
-            if (avVo->getSex() == SEX_FEMALE)
+            LLVOAvatar* avVo = static_cast<LLVOAvatar*>(gObjectList.findObject(avatar_id));
+            if (avVo)
             {
-                color = LLColor4::pink;
-            }
-            else if (avVo->getSex() == SEX_MALE)
-            {
-                color = LLColor4::orange;
+                if (avVo->getSex() == SEX_FEMALE)
+                {
+                    color = LLColor4::pink;
+                }
+                else if (avVo->getSex() == SEX_MALE)
+                {
+                    color = LLColor4::orange;
+                }
             }
         }
     }

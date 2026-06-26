@@ -116,6 +116,12 @@ LLAvatarListItem::LLAvatarListItem(bool not_from_ui_factory/* = true*/)
     // <FS:Ansariel> Add callback for user volume change
     mVoiceLevelChangeCallbackConnection = LLVoiceClient::setUserVolumeUpdateCallback(boost::bind(&LLAvatarListItem::onUserVoiceLevelChange, this, _1));
     // </FS:Ansariel>
+
+    mColorByGenderConn = gSavedSettings.getControl("FSColorAvatarsByGender")->getSignal()->connect(
+        [this](LLControlVariable*, const LLSD&, const LLSD&) {
+            if (mAvatarName)
+                setNameInternal(mAvatarName->getText(), mHighlihtSubstring);
+        });
 }
 
 LLAvatarListItem::~LLAvatarListItem()
@@ -138,6 +144,11 @@ LLAvatarListItem::~LLAvatarListItem()
         mVoiceLevelChangeCallbackConnection.disconnect();
     }
     // </FS:Ansariel>
+
+    if (mColorByGenderConn.connected())
+    {
+        mColorByGenderConn.disconnect();
+    }
 }
 
 bool LLAvatarListItem::postBuild()
@@ -618,26 +629,25 @@ void LLAvatarListItem::setNameInternal(const std::string& name, const std::strin
             avatar_name_style.color = params.online_style().color();
         }
     }
-    if (mUseContactSetColors)
+    static LLCachedControl<bool> colorByGender(gSavedSettings, "FSColorAvatarsByGender");
+    LLColor4 contact_set_color;
+    if (mUseContactSetColors &&
+        LGGContactSets::getInstance()->hasFriendColorThatShouldShow(mAvatarId, ContactSetType::FRIENDS, contact_set_color))
     {
-        LLColor4 contact_set_color;
-        if (LGGContactSets::getInstance()->hasFriendColorThatShouldShow(mAvatarId, ContactSetType::FRIENDS, contact_set_color))
+        avatar_name_style.color = contact_set_color;
+    }
+    else if (colorByGender)
+    {
+        LLVOAvatar* avVo = static_cast<LLVOAvatar*>(gObjectList.findObject(mAvatarId));
+        if (avVo)
         {
-            avatar_name_style.color = contact_set_color;
-        }
-        else if (gSavedSettings.getBOOL("FSColorAvatarsByGender"))
-        {
-            LLVOAvatar* avVo = static_cast<LLVOAvatar*>(gObjectList.findObject(mAvatarId));
-            if (avVo)
+            if (avVo->getSex() == SEX_FEMALE)
             {
-                if (avVo->getSex() == SEX_FEMALE)
-                {
-                    avatar_name_style.color = LLColor4::pink;
-                }
-                else if (avVo->getSex() == SEX_MALE)
-                {
-                    avatar_name_style.color = LLColor4::orange;
-                }
+                avatar_name_style.color = LLColor4::pink;
+            }
+            else if (avVo->getSex() == SEX_MALE)
+            {
+                avatar_name_style.color = LLColor4::orange;
             }
         }
     }

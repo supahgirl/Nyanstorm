@@ -170,6 +170,8 @@ protected:
 
     // <FS:Ansariel> Add callback for user volume change
     boost::signals2::connection mVoiceLevelChangeCallbackConnection;
+
+    boost::signals2::connection mColorByGenderConn;
     void onUserVoiceLevelChange(const LLUUID& avatar_id);
     void updateVoiceLevelSlider();
 

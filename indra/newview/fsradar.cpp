@@ -610,7 +610,8 @@ void FSRadar::updateRadarList()
 
         contactsets->hasFriendColorThatShouldShow(avId, ContactSetType::RADAR, name_color);
 
-        if (name_color == base_color && avVo)
+        static LLCachedControl<bool> colorByGender(gSavedSettings, "FSColorAvatarsByGender");
+        if (name_color == base_color && avVo && colorByGender)
         {
             if (avVo->getSex() == SEX_FEMALE)
             {
