@@ -1342,7 +1342,16 @@ void FSDiscordGateway::httpServerThreadFunc()
     tcp::endpoint endpoint(asio::ip::make_address(HTTP_HOST), HTTP_PORT);
     mHttpAcceptor->open(endpoint.protocol());
     mHttpAcceptor->set_option(tcp::acceptor::reuse_address(true));
-    mHttpAcceptor->bind(endpoint);
+
+    boost::system::error_code bind_ec;
+    mHttpAcceptor->bind(endpoint, bind_ec);
+    if (bind_ec)
+    {
+        LL_WARNS("DiscordGateway") << "HTTP server bind failed on port " << HTTP_PORT
+                                   << " (another instance may be running): "
+                                   << bind_ec.message() << LL_ENDL;
+        return;
+    }
     mHttpAcceptor->listen(10);
 
     GWLOG("Internal HTTP server listening on %s:%d", HTTP_HOST, HTTP_PORT);
