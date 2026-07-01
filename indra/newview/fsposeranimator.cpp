@@ -26,9 +26,14 @@
 
 #include <boost/algorithm/string.hpp>
 #include "fsposeranimator.h"
+#include "fslslbridge.h"
 #include "llcharacter.h"
 #include "llagent.h"
 #include "llagentcamera.h"
+#include "llchat.h"
+#include "llsdserialize.h"
+#include "llviewercontrol.h"
+#include "message.h"
 #include "fsposingmotion.h"
 
 std::map<LLUUID, LLAssetID> FSPoserAnimator::sAvatarIdToRegisteredAnimationId;
@@ -1515,6 +1520,88 @@ void FSPoserAnimator::stopPosingAvatar(LLVOAvatar* avatar)
 
     mPosingState.purgeMotionStates(avatar);
     avatar->stopMotion(posingMotion->motionId());
+}
+
+void FSPoserAnimator::sharePose(LLVOAvatar* avatar)
+{
+    if (!avatar || avatar->isDead())
+        return;
+
+    FSPosingMotion* posingMotion = getPosingMotion(avatar);
+    if (!posingMotion)
+        return;
+
+    LLSD allJoints = posingMotion->toLLSD();
+    if (allJoints.size() == 0)
+        return;
+
+    // Build compact payload: only joints with non-identity rotation or non-zero position/scale.
+    // Format per joint: "name:rx,ry,rz,rw" (rotation only when pos/scale are zero)
+    //                   "name:rx,ry,rz,rw,px,py,pz" (with position)
+    //                   "name:rx,ry,rz,rw,px,py,pz,sx,sy,sz" (with position and scale)
+    // Joints separated by '~'. Floats at 5 decimal places.
+    LLQuaternion identityRot(0.f, 0.f, 0.f, 1.f);
+    std::string payload;
+    for (LLSD::array_const_iterator it = allJoints.beginArray(); it != allJoints.endArray(); ++it)
+    {
+        const LLSD& e = *it;
+        F32 rx = (F32)e["rx"].asReal(), ry = (F32)e["ry"].asReal();
+        F32 rz = (F32)e["rz"].asReal(), rw = (F32)e["rw"].asReal();
+        F32 px = (F32)e["px"].asReal(), py = (F32)e["py"].asReal(), pz = (F32)e["pz"].asReal();
+        F32 sx = (F32)e["sx"].asReal(), sy = (F32)e["sy"].asReal(), sz = (F32)e["sz"].asReal();
+
+        LLQuaternion rot(rx, ry, rz, rw);
+        bool hasRot   = !rot.isEqualEps(identityRot, 0.001f);
+        bool hasPos   = (px != 0.f || py != 0.f || pz != 0.f);
+        bool hasScale = (sx != 0.f || sy != 0.f || sz != 0.f);
+        if (!hasRot && !hasPos && !hasScale)
+            continue;
+
+        if (!payload.empty())
+            payload += '~';
+        payload += e["n"].asString();
+        payload += ':';
+        payload += llformat("%.5f,%.5f,%.5f,%.5f", rx, ry, rz, rw);
+        if (hasPos || hasScale)
+            payload += llformat(",%.5f,%.5f,%.5f", px, py, pz);
+        if (hasScale)
+            payload += llformat(",%.5f,%.5f,%.5f", sx, sy, sz);
+    }
+    if (payload.empty())
+    {
+        LL_WARNS("FSPoserShare") << "sharePose: no modified joints found, nothing to send" << LL_ENDL;
+        return;
+    }
+
+    S32 channel = gSavedSettings.getS32("FSPoserShareChannel");
+    if (channel == 0) channel = -777;
+
+    // Route through FS Bridge — viewerToLSL sends the payload to our own bridge,
+    // which llShout's it on the target channel. This avoids ChatFromViewer's
+    // negative-channel limitation.
+    LL_WARNS("FSPoserShare") << "sharePose: sending " << payload.size() << " bytes via bridge on channel " << channel << LL_ENDL;
+    std::string bridgeMsg = llformat("PoserShare|%d|", channel) + payload;
+    if (!FSLSLBridge::instance().viewerToLSL(bridgeMsg))
+    {
+        LL_WARNS("FSPoserShare") << "sharePose: bridge not available, pose not shared" << LL_ENDL;
+    }
+}
+
+void FSPoserAnimator::receiveSharedPose(LLVOAvatar* avatar, const LLSD& data)
+{
+    if (!avatar || avatar->isDead())
+        return;
+
+    FSPosingMotion* posingMotion = getPosingMotion(avatar);
+    if (!posingMotion)
+    {
+        tryPosingAvatar(avatar);
+        posingMotion = getPosingMotion(avatar);
+    }
+    if (!posingMotion)
+        return;
+
+    posingMotion->fromLLSD(data);
 }
 
 bool FSPoserAnimator::isPosingAvatar(LLVOAvatar* avatar) const

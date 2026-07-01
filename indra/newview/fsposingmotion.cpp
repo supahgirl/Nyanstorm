@@ -28,6 +28,19 @@
 #include <boost/algorithm/string.hpp>
 #include "fsposingmotion.h"
 #include "llcharacter.h"
+#include "llviewercontrol.h"
+#include "llmotioncontroller.h"
+
+LLJoint::JointPriority FSPosingMotion::getPriority()
+{
+    if (gSavedSettings.getBOOL("FSPoserLiveOverlay"))
+        return LLJoint::LOW_PRIORITY; // let animation win
+
+    S32 pri = gSavedSettings.getS32("FSPoserPriority");
+    if (pri < 0) pri = 0;
+    if (pri > 7) pri = 7;
+    return (LLJoint::JointPriority)pri;
+}
 
 FSPosingMotion::FSPosingMotion(const LLUUID& id) : LLKeyframeMotion(id)
 {
@@ -76,6 +89,31 @@ bool FSPosingMotion::onActivate()
 
 bool FSPosingMotion::onUpdate(F32 time, U8* joint_mask)
 {
+    bool live = gSavedSettings.getBOOL("FSPoserLiveOverlay");
+
+    if (live)
+    {
+        // Live overlay: set priority 0 AND mirror current joint state
+        // so Poser is transparent in blender. Animation wins.
+        for (FSJointPose jointPose : mJointPoses)
+        {
+            LLJoint* joint = jointPose.getJointState()->getJoint();
+            if (!joint) continue;
+            jointPose.getJointState()->setPriority(LLJoint::LOW_PRIORITY);
+            jointPose.getJointState()->setRotation(joint->getRotation());
+            jointPose.getJointState()->setPosition(joint->getPosition());
+            jointPose.getJointState()->setScale(joint->getScale());
+        }
+        return true;
+    }
+
+    // Frozen mode: restore configured priority, interpolate toward target
+    S32 cfg_pri = gSavedSettings.getS32("FSPoserPriority");
+    if (cfg_pri < 0) cfg_pri = 0;
+    if (cfg_pri > 7) cfg_pri = 7;
+    for (FSJointPose jp : mJointPoses)
+        jp.getJointState()->setPriority((LLJoint::JointPriority)cfg_pri);
+
     LLQuaternion targetRotation;
     LLQuaternion currentRotation;
     LLVector3 currentPosition;
@@ -119,6 +157,35 @@ bool FSPosingMotion::onUpdate(F32 time, U8* joint_mask)
 }
 
 void FSPosingMotion::onDeactivate() { revertJointsAndCollisionVolumes(); }
+
+void FSPosingMotion::onPostBlend()
+{
+    if (!gSavedSettings.getBOOL("FSPoserLiveOverlay"))
+        return;
+
+    for (FSJointPose jointPose : mJointPoses)
+    {
+        LLJoint* joint = jointPose.getJointState()->getJoint();
+        if (!joint) continue;
+
+        // Read animation output from the blender
+        LLQuaternion animRot = joint->getRotation();
+        LLVector3    animPos = joint->getPosition();
+        LLVector3    animScl = joint->getScale();
+
+        LLQuaternion pubRot = jointPose.getPublicRotation();
+        if (pubRot != LLQuaternion::DEFAULT)
+            joint->setRotation(pubRot * animRot);
+
+        LLVector3 pubPos = jointPose.getPublicPosition();
+        if (!pubPos.isExactlyZero())
+            joint->setPosition(animPos + pubPos);
+
+        LLVector3 pubScl = jointPose.getPublicScale();
+        if (!pubScl.isExactlyZero())
+            joint->setScale(animScl.scaledVec(pubScl));
+    }
+}
 
 void FSPosingMotion::revertJointsAndCollisionVolumes()
 {
@@ -424,4 +491,50 @@ bool FSPosingMotion::quatsNotQuiteEqual(const LLQuaternion& q1, const LLQuaterni
         return false;
 
     return true;
+}
+
+LLSD FSPosingMotion::toLLSD() const
+{
+    LLSD result = LLSD::emptyArray();
+    for (auto joint_iter = mJointPoses.begin(); joint_iter != mJointPoses.end(); ++joint_iter)
+    {
+        const FSJointPose& joint = *joint_iter;
+        LLSD entry;
+        entry["n"] = joint.jointName();
+        entry["rx"] = joint.getPublicRotation().mQ[VX];
+        entry["ry"] = joint.getPublicRotation().mQ[VY];
+        entry["rz"] = joint.getPublicRotation().mQ[VZ];
+        entry["rw"] = joint.getPublicRotation().mQ[VW];
+        entry["px"] = joint.getPublicPosition().mV[VX];
+        entry["py"] = joint.getPublicPosition().mV[VY];
+        entry["pz"] = joint.getPublicPosition().mV[VZ];
+        entry["sx"] = joint.getPublicScale().mV[VX];
+        entry["sy"] = joint.getPublicScale().mV[VY];
+        entry["sz"] = joint.getPublicScale().mV[VZ];
+        result.append(entry);
+    }
+    return result;
+}
+
+void FSPosingMotion::fromLLSD(const LLSD& data)
+{
+    if (!data.isArray()) return;
+
+    for (LLSD::array_const_iterator it = data.beginArray(); it != data.endArray(); ++it)
+    {
+        const LLSD& entry = *it;
+        std::string name = entry["n"].asString();
+        FSJointPose* pose = getJointPoseByJointName(name);
+        if (pose)
+        {
+            LLQuaternion rot((F32)entry["rx"].asReal(), (F32)entry["ry"].asReal(),
+                             (F32)entry["rz"].asReal(), (F32)entry["rw"].asReal());
+            LLVector3 pos((F32)entry["px"].asReal(), (F32)entry["py"].asReal(), (F32)entry["pz"].asReal());
+            LLVector3 scale((F32)entry["sx"].asReal(), (F32)entry["sy"].asReal(), (F32)entry["sz"].asReal());
+
+            pose->setPublicRotation(false, false, POSER_CHANGE_ROTATION, rot);
+            if (!pos.isExactlyZero()) pose->setPublicPosition(pos);
+            if (!scale.isExactlyZero()) pose->setPublicScale(scale);
+        }
+    }
 }

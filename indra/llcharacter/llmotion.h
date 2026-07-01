@@ -165,6 +165,10 @@ protected:
     // it will be deactivated
     virtual bool onActivate() = 0;
 
+    // Called after all motions have blended — allows post-processing
+    // (e.g. live overlay deltas) without competing in the blender.
+    virtual void onPostBlend() {}
+
     void addJointState(const LLPointer<LLJointState>& jointState);
 
 protected:

@@ -14920,6 +14920,24 @@ https://wiki.firestormviewer.org/antivirus_whitelisting
 
   <notification
    icon="notifytip.tga"
+   name="PoserShareNotPosing"
+   type="notifytip">
+    You must be actively posing an avatar to share. Start posing first, then click Share Pose.
+    <tag>confirm</tag>
+    <usetemplate name="okbutton" yestext="OK"/>
+  </notification>
+
+  <notification
+   icon="notifytip.tga"
+   name="PoserReceiveSharedPose"
+   type="notify">
+    [NAME] is sharing pose modifiers with you. Do you want to apply them?
+    <tag>confirm</tag>
+    <usetemplate name="okcancelbuttons" notext="Ignore" yestext="Accept"/>
+  </notification>
+
+  <notification
+   icon="notifytip.tga"
    name="FSLargeOutfitsWarningInThisSession"
    type="alertmodal">
     <unique/>

@@ -50,38 +50,21 @@ public:
 public:
     static LLMotion *create(const LLUUID &id) { return new FSPosingMotion(id); }
 
-    virtual bool getLoop() { return true; }
-
-    virtual F32 getDuration() { return 0.0; }
-
-    virtual F32 getEaseInDuration() { return 0.0f; }
-
-    virtual F32 getEaseOutDuration() { return 0.5f; }
-
-    virtual LLJoint::JointPriority getPriority() { return LLJoint::ADDITIVE_PRIORITY; }
-
-    virtual LLMotionBlendType getBlendType() { return NORMAL_BLEND; }
+    bool getLoop() override { return true; }
+    F32 getDuration() override { return 0.0; }
+    F32 getEaseInDuration() override { return 0.0f; }
+    F32 getEaseOutDuration() override { return 0.5f; }
+    LLJoint::JointPriority getPriority() override;
+    LLMotionBlendType getBlendType() override { return NORMAL_BLEND; }
 
     // called to determine when a motion should be activated/deactivated based on avatar pixel coverage
-    virtual F32 getMinPixelArea() { return MIN_REQUIRED_PIXEL_AREA_POSING; }
+    F32 getMinPixelArea() override { return MIN_REQUIRED_PIXEL_AREA_POSING; }
 
-    // run-time (post constructor) initialization,
-    // called after parameters have been set
-    // must return true to indicate success and be available for activation
-    virtual LLMotionInitStatus onInitialize(LLCharacter* character);
-
-    // called when a motion is activated
-    // must return TRUE to indicate success, or else
-    // it will be deactivated
-    virtual bool onActivate();
-
-    // called per time step
-    // must return TRUE while it is active, and
-    // must return FALSE when the motion is completed.
-    virtual bool onUpdate(F32 time, U8 *joint_mask);
-
-    // called when a motion is deactivated
-    virtual void onDeactivate();
+    LLMotionInitStatus onInitialize(LLCharacter* character) override;
+    bool onActivate() override;
+    bool onUpdate(F32 time, U8 *joint_mask) override;
+    void onDeactivate() override;
+    void onPostBlend() override;
 
     /// <summary>
     /// Queries whether the supplied joint is being animated.
@@ -192,6 +175,16 @@ public:
     /// Thus its most common usage would be to access those properties for an arbitrary animation.
     /// </remarks>
     bool motionAnimatesJoints(const std::vector<S32>& recapturedJointNumbers);
+
+    /// <summary>
+    /// Serializes the current pose modifiers (joint name + rotation/position/scale deltas) to LLSD.
+    /// </summary>
+    LLSD toLLSD() const;
+
+    /// <summary>
+    /// Deserializes pose modifiers from LLSD and applies them as base adjustments.
+    /// </summary>
+    void fromLLSD(const LLSD& data);
 
 private:
     /// <summary>

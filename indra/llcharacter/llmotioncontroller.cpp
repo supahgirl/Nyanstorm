@@ -907,6 +907,15 @@ void LLMotionController::updateMotions(bool force_update)
     }
 
     mHasRunOnce = true;
+
+    // Post-blend hook: let FSPosingMotion apply live overlay deltas
+    for (motion_list_t::iterator it = mActiveMotions.begin(); it != mActiveMotions.end(); ++it)
+    {
+        LLMotion* motion = *it;
+        if (motion)
+            motion->onPostBlend();
+    }
+
 //  LL_INFOS() << "Motion controller time " << motionTimer.getElapsedTimeF32() << LL_ENDL;
 }
 

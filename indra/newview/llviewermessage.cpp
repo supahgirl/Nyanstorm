@@ -145,6 +145,7 @@
 #include "fsfloaterplacedetails.h"
 #include "fsradar.h"
 #include "fskeywords.h" // <FS:PP> FIRE-10178: Keyword Alerts in group IM do not work unless the group is in the foreground
+#include "fsposeranimator.h"
 #include "fslslbridge.h"
 #include "fsmoneytracker.h"
 #include "llattachmentsmgr.h"
@@ -3123,6 +3124,11 @@ void process_chat_from_simulator(LLMessageSystem *msg, void **user_data)
                 // <FS:TT> Client LSL Bridge
                 {
                     if (FSLSLBridge::instance().lslToViewer(mesg, from_id, owner_id))
+                    {
+                        return;
+                    }
+                    // Suppress raw Poser bridge protocol messages from chat display
+                    if (mesg.find("<sharedPose>") == 0 || mesg.find("<sharedPoseClear>") == 0)
                     {
                         return;
                     }

@@ -1009,10 +1009,11 @@
 						 button_flash_rate="0.5"
 						 tool_tip="Start posing the selected avatar or animesh, if you are allowed to."
 						 name="start_stop_posing_button"
-						 width="150">
+						 width="145">
 							<button.commit_callback
 							 function="Poser.StartStopAnimating"/>
 						</button>
+
 						<button
 						 height="21"
 						 follows="top|left"
@@ -1023,7 +1024,7 @@
 						 image_unselected="Toolbar_Middle_Off"
 						 name="set_t_pose_button"
 						 tool_tip="Click to set the selected avatar to a 'T-Pose'"
-						 width="172">
+						 width="145">
 							<button.commit_callback
 							 function="Poser.SetToTPose"/>
 						</button>
@@ -1135,6 +1136,16 @@
 						 top_pad="5"
 						 width="134" />
 						<check_box
+						 control_name="FSPoserLiveOverlay"
+						 name="live_overlay_checkbox"
+						 height="16"
+						 label="Live Overlay"
+						 follows="left|top"
+						 left="5"
+						 tool_tip="Track the playing animation in real time. User adjustments are applied on top of the current animation pose instead of freezing."
+						 top_pad="5"
+						 width="134" />
+						<check_box
 						 control_name="RenderDepthOfFieldInEditMode"
 						 name="dof_edit_mode_checkbox"
 						 height="16"
@@ -1144,6 +1155,36 @@
 						 tool_tip="When using the Manipulator, Depth of Field normally disables automatically. This keeps Depth of Field on when editing poses or prims."
 						 top_pad="5"
 						 width="134" />
+						<button
+						 height="21"
+						 follows="left|top"
+						 layout="topleft"
+						 left="5"
+						 top_pad="10"
+						 enabled="false"
+						 label="Share Pose"
+						 name="share_pose_button"
+						 width="130"
+						 tool_tip="Share pose modifiers with nearby viewers on private channel. Receivers must accept via dialog.">
+							<button.commit_callback
+							 function="Poser.SharePose"/>
+						</button>
+						<spinner
+						 height="18"
+						 follows="left|top"
+						 layout="topleft"
+						 left="5"
+						 top_pad="5"
+						 width="55"
+						 label="Priority"
+						 label_width="40"
+						 min_val="0"
+						 max_val="7"
+						 decimal_digits="0"
+						 increment="1"
+						 control_name="FSPoserPriority"
+						 tool_tip="Override priority: 7=freeze (default), lower values let animations play through"
+						 name="poser_priority_spinner"/>
 					</panel>
 				</tab_container>
 				<button

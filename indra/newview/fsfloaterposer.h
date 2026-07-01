@@ -272,6 +272,7 @@ public:
     void onResetJoint(const LLSD& data);
     void onSetAvatarToTpose();
     void onPoseStartStop();
+    void onSharePose();
     void onTrackballChanged();
     void onYawPitchRollChanged(bool skipUpdateTrackpad = false);
     void onPositionSet();
@@ -528,6 +529,7 @@ public:
 
     LLButton* mToggleVisualManipulators{ nullptr };
     LLButton* mStartStopPosingBtn{ nullptr };
+    LLButton* mSharePoseBtn{ nullptr };
     LLButton* mToggleLoadSavePanelBtn{ nullptr };
     LLButton* mBrowserFolderBtn{ nullptr };
     LLButton* mLoadPosesBtn{ nullptr };

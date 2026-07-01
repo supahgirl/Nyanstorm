@@ -1450,6 +1450,39 @@
       <key>Value</key>
       <boolean>1</boolean>
     </map>
+    <key>FSPoserLiveOverlay</key>
+    <map>
+      <key>Comment</key>
+      <string>When enabled, the Poser tracks the playing animation frame-by-frame instead of freezing. User adjustments are applied on top of the current animation pose in real time. Takes effect on next Start Posing.</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>Boolean</string>
+      <key>Value</key>
+      <boolean>0</boolean>
+    </map>
+    <key>FSPoserPriority</key>
+    <map>
+      <key>Comment</key>
+      <string>Animation priority used by the Poser (0-7). Lower values let animations win on some bones. Default 7 (override all).</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>S32</string>
+      <key>Value</key>
+      <integer>7</integer>
+    </map>
+    <key>FSPoserShareChannel</key>
+    <map>
+      <key>Comment</key>
+      <string>Chat channel used for poser bone modifier sharing. Default -777. Receivers must also set this to the same channel.</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>S32</string>
+      <key>Value</key>
+      <integer>-777</integer>
+    </map>
     <key>RLVaExperimentalCommands</key>
     <map>
       <key>Comment</key>

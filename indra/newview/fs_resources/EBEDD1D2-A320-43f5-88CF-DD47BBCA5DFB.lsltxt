@@ -40,6 +40,15 @@ integer gAO_ListenerOC;
 integer gAO_ListenerLM;
 key gAO_CollarKey;
 
+// Poser share
+integer POSER_SHARE_CHANNEL = -777;
+integer gPoserShareListener;
+integer gPoseChunkTotal;
+integer gPoseChunksReceived;
+list    gPoseChunks;
+string  gPoseSenderName;
+key     gPoseSenderID;
+
 //
 // Bridge platform helper functions
 //
@@ -212,6 +221,9 @@ default
             // Remove previous AO listeners if present
             integrationCheckOC();
             integrationCheckLM();
+
+            // Listen for Poser share broadcasts
+            gPoserShareListener = llListen(POSER_SHARE_CHANNEL, "", NULL_KEY, "");
 
             // Assume the worst and let the viewer convince us otherwise
             gTryHandshakeOnce = TRUE;
@@ -578,6 +590,37 @@ default
                 gViewerIsFirestorm = TRUE;
             }
 
+            else if (cmd == "PoserShare")
+            {
+                // Share Pose: viewer sends compact joint payload via bridge.
+                // Bridge chunks it and llShout's on the target channel so all
+                // nearby bridges can hear it (ChatFromViewer can't do negative channels).
+                integer channel  = (integer)llList2String(commandList, 1);
+                string payload   = llList2String(commandList, 2);
+                string senderName = llGetDisplayName(gOwner);
+                if (senderName == "") senderName = llKey2Name(gOwner);
+
+                // llShout has ~1024 byte limit; chunk at 1000 bytes.
+                // Chunk format: "!!FSPOSER!!C<seq>/<total>|<senderName>|<data>"
+                integer chunkSize = 1000;
+                integer total = (llStringLength(payload) + chunkSize - 1) / chunkSize;
+                if (total == 0) total = 1;
+                integer i;
+                for (i = 0; i < total; ++i)
+                {
+                    string chunk = llGetSubString(payload, i * chunkSize, i * chunkSize + chunkSize - 1);
+                    llShout(channel, "!!FSPOSER!!C" + (string)i + "/" + (string)total + "|" + senderName + "|" + chunk);
+                }
+            }
+
+            else if (cmd == "PoserShareClear")
+            {
+                // Sender stopped posing — notify nearby viewers to clear modifiers.
+                string senderName = llGetDisplayName(gOwner);
+                if (senderName == "") senderName = llKey2Name(gOwner);
+                llShout(POSER_SHARE_CHANNEL, "!!FSPOSER!!CLEAR|" + senderName + "|");
+            }
+
             else if (cmd == "DetachBridge")
             {
                 // HTTP request from the viewer to immediately detach LSL-Client Bridge
@@ -626,6 +669,79 @@ default
                 else if (llGetSubString(msg, zhaoPos, zhaoPos + 6) == "STANDON")
                 {
                     aoState("standon");
+                }
+            }
+        }
+
+        // Poser share: receive chunked pose or clear signal from another avatar's bridge.
+        // Ignore own avatar's ChatFromViewer (senderID == gOwner) and own bridge's llShout (senderID == llGetKey()).
+        else if (fromChan == POSER_SHARE_CHANNEL && senderID != gOwner && senderID != llGetKey())
+        {
+            // Clear signal: "!!FSPOSER!!CLEAR|<senderName>|" — checked before chunks
+            // because "CLEAR" also starts with "C" which would match the chunk prefix.
+            if (llSubStringIndex(msg, "!!FSPOSER!!CLEAR") == 0)
+            {
+                string afterPrefix = llGetSubString(msg, 17, -1);  // skip "!!FSPOSER!!CLEAR|"
+                integer pipePos = llSubStringIndex(afterPrefix, "|");
+                if (pipePos >= 0)
+                {
+                    string senderName = llGetSubString(afterPrefix, 0, pipePos - 1);
+                    llOwnerSay("<sharedPoseClear>" + senderName + "</sharedPoseClear>");
+                }
+            }
+
+            // Chunk format: "!!FSPOSER!!C<seq>/<total>|<senderName>|<data>"
+            else if (llSubStringIndex(msg, "!!FSPOSER!!C") == 0)
+            {
+                string payload    = llGetSubString(msg, 12, -1);
+                integer slashPos  = llSubStringIndex(payload, "/");
+                integer pipe1Pos  = llSubStringIndex(payload, "|");
+                if (slashPos > 0 && pipe1Pos > slashPos)
+                {
+                    integer seq   = (integer)llGetSubString(payload, 0, slashPos - 1);
+                    integer total = (integer)llGetSubString(payload, slashPos + 1, pipe1Pos - 1);
+
+                    // After first pipe: "<senderName>|<data>"
+                    string afterPipe1 = llGetSubString(payload, pipe1Pos + 1, -1);
+                    integer pipe2Pos  = llSubStringIndex(afterPipe1, "|");
+                    string chunkSenderName;
+                    string chunk;
+                    if (pipe2Pos >= 0)
+                    {
+                        chunkSenderName = llGetSubString(afterPipe1, 0, pipe2Pos - 1);
+                        chunk           = llGetSubString(afterPipe1, pipe2Pos + 1, -1);
+                    }
+                    else
+                    {
+                        chunkSenderName = "";
+                        chunk           = afterPipe1;
+                    }
+
+                    if (seq == 0)
+                    {
+                        gPoseChunks         = [];
+                        gPoseChunksReceived = 0;
+                        gPoseChunkTotal     = total;
+                        gPoseSenderName     = chunkSenderName;
+                        gPoseSenderID       = senderID;
+                    }
+
+                    if (senderID == gPoseSenderID && total == gPoseChunkTotal)
+                    {
+                        while (llGetListLength(gPoseChunks) <= seq)
+                            gPoseChunks += [""];
+                        gPoseChunks = llListReplaceList(gPoseChunks, [chunk], seq, seq);
+                        gPoseChunksReceived++;
+
+                        if (gPoseChunksReceived >= total)
+                        {
+                            string assembled = llDumpList2String(gPoseChunks, "");
+                            llOwnerSay("<sharedPose>" + gPoseSenderName + "|!!FSPOSER!!" + assembled + "</sharedPose>");
+                            gPoseChunks         = [];
+                            gPoseChunksReceived = 0;
+                            gPoseChunkTotal     = 0;
+                        }
+                    }
                 }
             }
         }

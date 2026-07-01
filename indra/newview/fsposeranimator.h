@@ -424,6 +424,19 @@ public:
     void stopPosingAvatar(LLVOAvatar* avatar);
 
     /// <summary>
+    /// Shares the current pose modifiers for the supplied avatar via chat on the configured channel.
+    /// </summary>
+    /// <param name="avatar">The avatar whose pose to share.</param>
+    void sharePose(LLVOAvatar* avatar);
+
+    /// <summary>
+    /// Applies shared pose modifiers received via chat to the supplied avatar.
+    /// </summary>
+    /// <param name="avatar">The avatar to apply the pose to.</param>
+    /// <param name="data">The LLSD containing the pose modifiers.</param>
+    void receiveSharedPose(LLVOAvatar* avatar, const LLSD& data);
+
+    /// <summary>
     /// Determines if the supplied avatar is being posed by this.
     /// </summary>
     /// <param name="avatar">The avatar to query posing status for.</param>

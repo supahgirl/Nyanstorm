@@ -25,6 +25,7 @@
  */
 
 #include "fsfloaterposer.h"
+#include "fslslbridge.h"
 #include "fsposeranimator.h"
 #include "fsvirtualtrackpad.h"
 #include "llagent.h"
@@ -85,6 +86,7 @@ FSFloaterPoser::FSFloaterPoser(const LLSD& key) : LLFloater(key)
     // Bind requests, other controls are find-and-binds, see postBuild()
     mCommitCallbackRegistrar.add("Poser.RefreshAvatars", [this](LLUICtrl*, const LLSD&) { onAvatarsRefresh(); });
     mCommitCallbackRegistrar.add("Poser.StartStopAnimating", [this](LLUICtrl*, const LLSD&) { onPoseStartStop(); });
+    mCommitCallbackRegistrar.add("Poser.SharePose", [this](LLUICtrl*, const LLSD&) { onSharePose(); });
     mCommitCallbackRegistrar.add("Poser.ToggleLoadSavePanel", [this](LLUICtrl*, const LLSD&) { onToggleLoadSavePanel(); });
     mCommitCallbackRegistrar.add("Poser.ToggleVisualManipulators", [this](LLUICtrl*, const LLSD&) { onToggleVisualManipulators(); });
     mCommitCallbackRegistrar.add("Poser.ToggleRotationFrame", [this](LLUICtrl* button, const LLSD&) { onToggleRotationFrameButton(button); });
@@ -192,6 +194,7 @@ bool FSFloaterPoser::postBuild()
 
     mPosesLoadSavePnl = getChild<LLPanel>("poses_loadSave");
     mStartStopPosingBtn = getChild<LLButton>("start_stop_posing_button");
+    mSharePoseBtn = getChild<LLButton>("share_pose_button");
     mToggleLoadSavePanelBtn = getChild<LLButton>("toggleLoadSavePanel");
     mBrowserFolderBtn = getChild<LLButton>("open_poseDir_button");
     mLoadPosesBtn = getChild<LLButton>("load_poses_button");
@@ -1423,6 +1426,7 @@ void FSFloaterPoser::stopPosingAllAvatars()
     if (!gAgentAvatarp || gAgentAvatarp.isNull() || !mAvatarSelectionScrollList)
         return;
 
+    bool anyStopped = false;
     for (auto listItem : mAvatarSelectionScrollList->getAllData())
     {
         LLScrollListCell* cell = listItem->getColumn(COL_UUID);
@@ -1433,7 +1437,16 @@ void FSFloaterPoser::stopPosingAllAvatars()
         LLVOAvatar* listAvatar       = getAvatarByUuid(selectedAvatarId);
 
         if (mPoserAnimator.isPosingAvatar(listAvatar))
+        {
             mPoserAnimator.stopPosingAvatar(listAvatar);
+            anyStopped = true;
+        }
+    }
+
+    if (anyStopped)
+    {
+        // Notify nearby viewers to clear pose modifiers.
+        FSLSLBridge::instance().viewerToLSL("PoserShareClear|");
     }
 
     onAvatarSelect();
@@ -1449,6 +1462,10 @@ void FSFloaterPoser::onPoseStartStop()
     if (arePosingSelected)
     {
         mPoserAnimator.stopPosingAvatar(avatar);
+
+        // Notify nearby viewers that we stopped posing — they should clear
+        // the sender's pose modifiers on their screens.
+        FSLSLBridge::instance().viewerToLSL("PoserShareClear|");
     }
     else
     {
@@ -1463,6 +1480,21 @@ void FSFloaterPoser::onPoseStartStop()
 
     onAvatarsRefresh();
     onAvatarSelect();
+}
+
+void FSFloaterPoser::onSharePose()
+{
+    LLVOAvatar* avatar = getUiSelectedAvatar();
+    if (!avatar)
+        return;
+
+    if (!mPoserAnimator.isPosingAvatar(avatar))
+    {
+        LLNotificationsUtil::add("PoserShareNotPosing");
+        return;
+    }
+
+    mPoserAnimator.sharePose(avatar);
 }
 
 bool FSFloaterPoser::couldAnimateAvatar(LLVOAvatar* avatar) const
@@ -2531,6 +2563,8 @@ void FSFloaterPoser::onAvatarSelect()
 
     mStartStopPosingBtn->setEnabled(haveImplicitPermission);
     mStartStopPosingBtn->setValue(arePosingSelected);
+
+    mSharePoseBtn->setEnabled(haveImplicitPermission && arePosingSelected);
 
     mSetToTposeButton->setEnabled(haveImplicitPermission && arePosingSelected);
     poseControlsEnable(arePosingSelected && haveImplicitPermission);

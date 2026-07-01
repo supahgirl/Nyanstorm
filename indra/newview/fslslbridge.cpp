@@ -30,10 +30,12 @@
 #include "fscommon.h"
 #include "fslslbridge.h"
 #include "fslslbridgerequest.h"
+#include "fsposeranimator.h"
 
 #include "apr_base64.h" // For getScriptInfo()
 #include "llagent.h"
 #include "llappearancemgr.h"
+#include "llavatarnamecache.h"
 #include "llattachmentsmgr.h"
 #include "llavatarappearance.h"
 #include "llinventoryfunctions.h"
@@ -41,6 +43,7 @@
 #include "llnotificationsutil.h"
 #include "llpreviewscript.h"
 #include "llselectmgr.h"
+#include "llsdserialize.h"
 #include "llsdutil.h"
 #include "llslurl.h"
 #include "lltrans.h"
@@ -546,6 +549,152 @@ bool FSLSLBridge::lslToViewer(std::string_view message, const LLUUID& fromID, co
         }
     }
     // </FS:PP>
+
+    // Poser share relay — bridge received a !!FSPOSER!! broadcast on channel -777 and forwarded it
+    else if (tag == "<sharedPose>")
+    {
+        status = true;
+        LL_WARNS("FSPoserShare") << "sharedPose tag received, message length=" << message.size() << LL_ENDL;
+        static const std::string END_TAG     = "</sharedPose>";
+        static const std::string POSE_MARKER = "|!!FSPOSER!!";
+
+        size_t endPos = message.find(END_TAG);
+        if (endPos == std::string::npos)
+        {
+            LL_WARNS("FSPoserShare") << "Missing </sharedPose> end tag" << LL_ENDL;
+        }
+        else
+        {
+            std::string content  = static_cast<std::string>(message.substr(tag.size(), endPos - tag.size()));
+            size_t sepPos = content.find(POSE_MARKER);
+            if (sepPos == std::string::npos)
+            {
+                LL_WARNS("FSPoserShare") << "Missing |!!FSPOSER!! separator in content" << LL_ENDL;
+            }
+            else
+            {
+                std::string senderName  = content.substr(0, sepPos);
+                std::string poseDataStr = content.substr(sepPos + POSE_MARKER.size());
+                LL_WARNS("FSPoserShare") << "sender=" << senderName << " poseData length=" << poseDataStr.size() << " first64=" << poseDataStr.substr(0, 64) << LL_ENDL;
+
+                // Parse compact format: "name:rx,ry,rz,rw[,px,py,pz[,sx,sy,sz]]" joints separated by '~'
+                LLSD data = LLSD::emptyArray();
+                size_t start = 0;
+                while (start < poseDataStr.size())
+                {
+                    size_t end = poseDataStr.find('~', start);
+                    if (end == std::string::npos)
+                        end = poseDataStr.size();
+                    std::string jstr = poseDataStr.substr(start, end - start);
+                    start = end + 1;
+
+                    size_t colon = jstr.find(':');
+                    if (colon == std::string::npos)
+                        continue;
+                    std::string name = jstr.substr(0, colon);
+                    std::string vals = jstr.substr(colon + 1);
+
+                    float v[10] = {0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f};
+                    int idx = 0;
+                    size_t vs = 0;
+                    while (idx < 10 && vs < vals.size())
+                    {
+                        size_t ve = vals.find(',', vs);
+                        if (ve == std::string::npos) ve = vals.size();
+                        v[idx++] = std::stof(vals.substr(vs, ve - vs));
+                        vs = ve + 1;
+                    }
+
+                    LLSD entry;
+                    entry["n"]  = name;
+                    entry["rx"] = v[0]; entry["ry"] = v[1];
+                    entry["rz"] = v[2]; entry["rw"] = v[3];
+                    entry["px"] = v[4]; entry["py"] = v[5]; entry["pz"] = v[6];
+                    entry["sx"] = v[7]; entry["sy"] = v[8]; entry["sz"] = v[9];
+                    data.append(entry);
+                }
+
+                LL_WARNS("FSPoserShare") << "Parsed " << data.size() << " joints" << LL_ENDL;
+                if (data.size() > 0)
+                {
+                    LLSD args;
+                    args["NAME"] = senderName;
+                    LLNotificationsUtil::add("PoserReceiveSharedPose", args,
+                        LLSD().with("pose_data", data).with("sender_name", senderName),
+                        [](const LLSD& notification, const LLSD& response)
+                        {
+                            S32 option = LLNotificationsUtil::getSelectedOption(notification, response);
+                            if (option == 0)
+                            {
+                                std::string targetName = notification["payload"]["sender_name"].asString();
+
+                                // Find the sender's avatar on the receiver's screen
+                                LLVOAvatar* target = nullptr;
+                                for (LLCharacter* character : LLCharacter::sInstances)
+                                {
+                                    LLVOAvatar* avatar = dynamic_cast<LLVOAvatar*>(character);
+                                    if (!avatar || avatar->isDead())
+                                        continue;
+
+                                    LLAvatarName av_name;
+                                    if (LLAvatarNameCache::get(avatar->getID(), &av_name))
+                                    {
+                                        if (av_name.getDisplayName() == targetName)
+                                        { target = avatar; break; }
+                                    }
+                                    if (avatar->getFullname() == targetName)
+                                    { target = avatar; break; }
+                                }
+
+                                if (target)
+                                {
+                                    FSPoserAnimator animator;
+                                    animator.tryPosingAvatar(target);
+                                    animator.receiveSharedPose(target, notification["payload"]["pose_data"]);
+                                }
+                            }
+                        });
+                }
+            }
+        }
+    }
+
+    // Poser share clear — sender stopped posing, clear modifiers on the sender's avatar
+    else if (tag == "<sharedPoseClear>")
+    {
+        status = true;
+        static const std::string END_TAG = "</sharedPoseClear>";
+        size_t endPos = message.find(END_TAG);
+        if (endPos != std::string::npos)
+        {
+            std::string senderName = static_cast<std::string>(message.substr(tag.size(), endPos - tag.size()));
+
+            // Find sender's avatar and clear pose modifiers
+            for (LLCharacter* character : LLCharacter::sInstances)
+            {
+                LLVOAvatar* avatar = dynamic_cast<LLVOAvatar*>(character);
+                if (!avatar || avatar->isDead())
+                    continue;
+
+                LLAvatarName av_name;
+                if (LLAvatarNameCache::get(avatar->getID(), &av_name))
+                {
+                    if (av_name.getDisplayName() == senderName)
+                    {
+                        FSPoserAnimator animator;
+                        animator.stopPosingAvatar(avatar);
+                        break;
+                    }
+                }
+                if (avatar->getFullname() == senderName)
+                {
+                    FSPoserAnimator animator;
+                    animator.stopPosingAvatar(avatar);
+                    break;
+                }
+            }
+        }
+    }
 
     return status;
 }
