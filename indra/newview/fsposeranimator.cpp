@@ -27,6 +27,7 @@
 #include <boost/algorithm/string.hpp>
 #include "fsposeranimator.h"
 #include "fslslbridge.h"
+#include "llavatarnamecache.h"
 #include "llcharacter.h"
 #include "llagent.h"
 #include "llagentcamera.h"
@@ -1477,6 +1478,10 @@ bool FSPoserAnimator::tryPosingAvatar(LLVOAvatar* avatar)
         if (avatar->isSelf())
             gAgent.stopFidget();
 
+        // Force full rendering for non-self avatars so bone changes are visible
+        if (!avatar->isSelf())
+            avatar->setVisualMuteSettings(LLVOAvatar::AV_ALWAYS_RENDER);
+
         mPosingState.captureMotionStates(avatar);
         avatar->startDefaultMotions();
         avatar->startMotion(posingMotion->motionId());
@@ -1517,6 +1522,10 @@ void FSPoserAnimator::stopPosingAvatar(LLVOAvatar* avatar)
     FSPosingMotion* posingMotion = getPosingMotion(avatar);
     if (!posingMotion)
         return;
+
+    // Restore normal impostor rendering for non-self avatars
+    if (!avatar->isSelf())
+        avatar->setVisualMuteSettings(LLVOAvatar::AV_RENDER_NORMALLY);
 
     mPosingState.purgeMotionStates(avatar);
     avatar->stopMotion(posingMotion->motionId());
@@ -1576,11 +1585,22 @@ void FSPoserAnimator::sharePose(LLVOAvatar* avatar)
     S32 channel = gSavedSettings.getS32("FSPoserShareChannel");
     if (channel == 0) channel = -777;
 
+    // Sender name (for the dialog) and target UUID (to find the right avatar)
+    std::string senderName;
+    std::string targetUuidStr = avatar->getID().asString();
+    LLAvatarName av_name;
+    if (LLAvatarNameCache::get(gAgentID, &av_name))
+        senderName = av_name.getDisplayName();
+    else if (gAgentAvatarp.notNull())
+        senderName = gAgentAvatarp->getFullname();
+    else
+        senderName = "Unknown";
+
     // Route through FS Bridge — viewerToLSL sends the payload to our own bridge,
     // which llShout's it on the target channel. This avoids ChatFromViewer's
     // negative-channel limitation.
-    LL_WARNS("FSPoserShare") << "sharePose: sending " << payload.size() << " bytes via bridge on channel " << channel << LL_ENDL;
-    std::string bridgeMsg = llformat("PoserShare|%d|", channel) + payload;
+    LL_WARNS("FSPoserShare") << "sharePose: sending " << payload.size() << " bytes via bridge on channel " << channel << " targetUUID=" << targetUuidStr << LL_ENDL;
+    std::string bridgeMsg = llformat("PoserShare|%d|%s|%s|", channel, senderName.c_str(), targetUuidStr.c_str()) + payload;
     if (!FSLSLBridge::instance().viewerToLSL(bridgeMsg))
     {
         LL_WARNS("FSPoserShare") << "sharePose: bridge not available, pose not shared" << LL_ENDL;

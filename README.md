@@ -1,6 +1,6 @@
 # Nyanstorm — Firestorm viewer fork
 
-Firestorm fork with AI agent chat, Discord integration, AO enhancements, avatar height detection, gender-based avatar coloring, RLV (nostrip) link protection, and Windows-compatible networking. Based on Firestorm 7.2.4.
+Firestorm fork with AI agent chat, Discord integration, AO enhancements, Poser enhancements (Live Overlay, Share Pose, priority control), avatar height detection, gender-based avatar coloring, RLV (nostrip) link protection, and Windows-compatible networking. Based on Firestorm 7.2.4.
 
 ---
 
@@ -123,6 +123,43 @@ The standard RLV `(nostrip)` folder protection is extended to work correctly wit
 
 This matches the expected behaviour described in the RLV specification.
 
+### Poser Enhancements
+
+The built-in Poser floater gets three additional capabilities on top of the standard Firestorm Poser:
+
+#### Live Overlay mode
+
+When enabled, the Poser tracks the currently playing animation frame-by-frame in real time instead of freezing the avatar in a static pose. Your bone adjustments are applied on top of the live animation — the avatar keeps moving while the modifications ride along.
+
+Toggle with the **Live Overlay** checkbox in the Poser floater (or via `FSPoserLiveOverlay` in Debug Settings). Takes effect on next *Start Posing*.
+
+#### Animation priority
+
+A **Priority** spinner in the Poser floater controls the animation priority (0–7, default 7). Lower values let other playing animations win on specific bones, which is useful for blending the pose with AO or attachment animations without fully overriding them.
+
+Saved in `FSPoserPriority`.
+
+#### Share Pose
+
+Share bone modifiers to nearby viewers via the FS Bridge relay. The recipient sees a permission dialog showing who sent the pose and can accept or decline.
+
+- Click **Share Pose** in the Poser floater while posing
+- The recipient receives a dialog: *"[Sender] is sharing pose modifiers with you. Accept?"*
+- On accept, their viewer applies the same bone modifiers to the correct avatar on their screen (matched by UUID, not by name)
+- Channel is configurable via `FSPoserShareChannel` (default `-777`); sender and receiver must use the same value
+
+#### Avatar List Management
+
+Two small icon buttons next to the Refresh button let you add or remove avatars from the Poser's avatar list:
+
+- **(+)** button — opens an avatar picker to add any nearby avatar (not just yourself or animesh)
+- **(-)** button — removes the selected avatar from the list (yourself is protected)
+- Manually-added avatars are preserved when clicking **Refresh** — only yourself and animesh are auto-culled
+
+#### Posing Other Avatars
+
+Select any avatar in the list and click **Start** to begin posing their bones. The affected avatar is forced to full rendering so bone changes (rotation, position, scale) are visible on your screen. This is a viewer-local effect — it only changes what you see. Use **Share Pose** to send your modifications to other viewers.
+
 ### Windows Compatibility
 
 All networking code uses **Boost.ASIO** instead of raw POSIX sockets. This means the viewer compiles and runs on Windows without modification — no Winsock2 workarounds or platform guards needed.
@@ -148,5 +185,8 @@ Toggle this in the Debug Settings: `FSColorAvatarsByGender` (Boolean). Contact-s
 | `FSDiscordBotToken` | String | *empty* | Discord user token for the built-in chat Gateway (see Discord Integration above) |
 | `FSEnableDiscordIntegration` | Boolean | — | Per-account toggle for Discord Gateway (set automatically) |
 | `FSColorAvatarsByGender` | Boolean | `1` | Color avatars by gender in Radar/Minimap/Nearby |
+| `FSPoserLiveOverlay` | Boolean | `0` | Poser tracks live animation frame-by-frame; adjustments applied on top in real time |
+| `FSPoserPriority` | S32 | `7` | Animation priority used by the Poser (0–7). Lower values let other animations win on some bones |
+| `FSPoserShareChannel` | S32 | `-777` | Chat channel used for Share Pose. Sender and receiver must use the same value |
 
 > Open the Debug Settings floater with **Ctrl+Shift+D** to view or edit any setting.

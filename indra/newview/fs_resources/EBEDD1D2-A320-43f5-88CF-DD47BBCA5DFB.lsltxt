@@ -48,6 +48,7 @@ integer gPoseChunksReceived;
 list    gPoseChunks;
 string  gPoseSenderName;
 key     gPoseSenderID;
+key     gPoseTargetUUID;
 
 //
 // Bridge platform helper functions
@@ -595,13 +596,13 @@ default
                 // Share Pose: viewer sends compact joint payload via bridge.
                 // Bridge chunks it and llShout's on the target channel so all
                 // nearby bridges can hear it (ChatFromViewer can't do negative channels).
-                integer channel  = (integer)llList2String(commandList, 1);
-                string payload   = llList2String(commandList, 2);
-                string senderName = llGetDisplayName(gOwner);
-                if (senderName == "") senderName = llKey2Name(gOwner);
+                integer channel    = (integer)llList2String(commandList, 1);
+                string senderName  = llList2String(commandList, 2);
+                string targetUUID  = llList2String(commandList, 3);
+                string payload     = llList2String(commandList, 4);
 
                 // llShout has ~1024 byte limit; chunk at 1000 bytes.
-                // Chunk format: "!!FSPOSER!!C<seq>/<total>|<senderName>|<data>"
+                // Chunk format: "!!FSPOSER!!C<seq>/<total>|<senderName>|<targetUUID>|<data>"
                 integer chunkSize = 1000;
                 integer total = (llStringLength(payload) + chunkSize - 1) / chunkSize;
                 if (total == 0) total = 1;
@@ -609,16 +610,17 @@ default
                 for (i = 0; i < total; ++i)
                 {
                     string chunk = llGetSubString(payload, i * chunkSize, i * chunkSize + chunkSize - 1);
-                    llShout(channel, "!!FSPOSER!!C" + (string)i + "/" + (string)total + "|" + senderName + "|" + chunk);
+                    llShout(channel, "!!FSPOSER!!C" + (string)i + "/" + (string)total + "|" + senderName + "|" + targetUUID + "|" + chunk);
                 }
             }
 
             else if (cmd == "PoserShareClear")
             {
                 // Sender stopped posing — notify nearby viewers to clear modifiers.
+                string targetUUID  = llList2String(commandList, 1);
                 string senderName = llGetDisplayName(gOwner);
                 if (senderName == "") senderName = llKey2Name(gOwner);
-                llShout(POSER_SHARE_CHANNEL, "!!FSPOSER!!CLEAR|" + senderName + "|");
+                llShout(POSER_SHARE_CHANNEL, "!!FSPOSER!!CLEAR|" + senderName + "|" + targetUUID + "|");
             }
 
             else if (cmd == "DetachBridge")
@@ -682,15 +684,20 @@ default
             if (llSubStringIndex(msg, "!!FSPOSER!!CLEAR") == 0)
             {
                 string afterPrefix = llGetSubString(msg, 17, -1);  // skip "!!FSPOSER!!CLEAR|"
-                integer pipePos = llSubStringIndex(afterPrefix, "|");
-                if (pipePos >= 0)
+                integer pipe1Pos = llSubStringIndex(afterPrefix, "|");
+                if (pipe1Pos >= 0)
                 {
-                    string senderName = llGetSubString(afterPrefix, 0, pipePos - 1);
-                    llOwnerSay("<sharedPoseClear>" + senderName + "</sharedPoseClear>");
+                    string senderName   = llGetSubString(afterPrefix, 0, pipe1Pos - 1);
+                    string targetUUID   = llGetSubString(afterPrefix, pipe1Pos + 1, -1);
+                    // targetUUID may have trailing "|" — strip it
+                    integer pipe2Pos = llSubStringIndex(targetUUID, "|");
+                    if (pipe2Pos >= 0)
+                        targetUUID = llGetSubString(targetUUID, 0, pipe2Pos - 1);
+                    llOwnerSay("<sharedPoseClear>" + senderName + "|" + targetUUID + "</sharedPoseClear>");
                 }
             }
 
-            // Chunk format: "!!FSPOSER!!C<seq>/<total>|<senderName>|<data>"
+            // Chunk format: "!!FSPOSER!!C<seq>/<total>|<senderName>|<targetUUID>|<data>"
             else if (llSubStringIndex(msg, "!!FSPOSER!!C") == 0)
             {
                 string payload    = llGetSubString(msg, 12, -1);
@@ -701,19 +708,33 @@ default
                     integer seq   = (integer)llGetSubString(payload, 0, slashPos - 1);
                     integer total = (integer)llGetSubString(payload, slashPos + 1, pipe1Pos - 1);
 
-                    // After first pipe: "<senderName>|<data>"
+                    // After first pipe: "<senderName>|<targetUUID>|<data>"
                     string afterPipe1 = llGetSubString(payload, pipe1Pos + 1, -1);
                     integer pipe2Pos  = llSubStringIndex(afterPipe1, "|");
                     string chunkSenderName;
+                    string chunkTargetUUID;
                     string chunk;
                     if (pipe2Pos >= 0)
                     {
                         chunkSenderName = llGetSubString(afterPipe1, 0, pipe2Pos - 1);
-                        chunk           = llGetSubString(afterPipe1, pipe2Pos + 1, -1);
+                        // After second pipe: "<targetUUID>|<data>"
+                        string afterPipe2 = llGetSubString(afterPipe1, pipe2Pos + 1, -1);
+                        integer pipe3Pos  = llSubStringIndex(afterPipe2, "|");
+                        if (pipe3Pos >= 0)
+                        {
+                            chunkTargetUUID = llGetSubString(afterPipe2, 0, pipe3Pos - 1);
+                            chunk           = llGetSubString(afterPipe2, pipe3Pos + 1, -1);
+                        }
+                        else
+                        {
+                            chunkTargetUUID = "";
+                            chunk           = afterPipe2;
+                        }
                     }
                     else
                     {
                         chunkSenderName = "";
+                        chunkTargetUUID = "";
                         chunk           = afterPipe1;
                     }
 
@@ -724,6 +745,7 @@ default
                         gPoseChunkTotal     = total;
                         gPoseSenderName     = chunkSenderName;
                         gPoseSenderID       = senderID;
+                        gPoseTargetUUID     = (key)chunkTargetUUID;
                     }
 
                     if (senderID == gPoseSenderID && total == gPoseChunkTotal)
@@ -736,10 +758,11 @@ default
                         if (gPoseChunksReceived >= total)
                         {
                             string assembled = llDumpList2String(gPoseChunks, "");
-                            llOwnerSay("<sharedPose>" + gPoseSenderName + "|!!FSPOSER!!" + assembled + "</sharedPose>");
+                            llOwnerSay("<sharedPose>" + gPoseSenderName + "|" + (string)gPoseTargetUUID + "|!!FSPOSER!!" + assembled + "</sharedPose>");
                             gPoseChunks         = [];
                             gPoseChunksReceived = 0;
                             gPoseChunkTotal     = 0;
+                            gPoseTargetUUID     = NULL_KEY;
                         }
                     }
                 }

@@ -452,6 +452,7 @@
 	<string name="LoadDiffLabel">Load Diff</string>
 	<string name="SaveDiffLabel">Save Diff</string>
 	<string name="OverWriteLabel">Overwrite?</string>
+	<string name="AddAvatarTitle">Select an avatar to add</string>
 
 	<floater.string name="FiledateFormat">
 		[year,datetime,local]/[mthnum,datetime,local]/[day,datetime,local] [hour,datetime,local]:[min,datetime,local]:[second,datetime,local]
@@ -981,13 +982,43 @@
 						 follows="top|left"
 						 layout="topleft"
 						 label=""
+						 image_overlay="AddItem_Off"
+						 image_unselected="Toolbar_Middle_Off"
+						 name="add_avatar_btn"
+						 tool_tip="Add an avatar to the list from nearby"
+						 width="20"
+						 top="244"
+						 left="3">
+							<button.commit_callback
+							 function="Poser.AddAvatar"/>
+						</button>
+						<button
+						 height="21"
+						 follows="top|left"
+						 layout="topleft"
+						 label=""
+						 image_overlay="MinusItem_Off"
+						 image_unselected="Toolbar_Middle_Off"
+						 name="remove_avatar_btn"
+						 tool_tip="Remove the selected avatar from the list"
+						 width="20"
+						 top_delta="0"
+						 left_pad="1">
+							<button.commit_callback
+							 function="Poser.RemoveAvatar"/>
+						</button>
+						<button
+						 height="21"
+						 follows="top|left"
+						 layout="topleft"
+						 label=""
 						 image_overlay="Refresh_Off"
 						 image_unselected="Toolbar_Middle_Off"
 						 name="refresh_avatars"
 						 tool_tip="Refresh the list of avatars and animeshes"
 						 width="20"
-						 top="244"
-						 left="3">
+						 top_delta="0"
+						 left_pad="1">
 							<button.commit_callback
 							 function="Poser.RefreshAvatars"/>
 						</button>

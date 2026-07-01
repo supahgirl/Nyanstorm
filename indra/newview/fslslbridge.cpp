@@ -573,9 +573,23 @@ bool FSLSLBridge::lslToViewer(std::string_view message, const LLUUID& fromID, co
             }
             else
             {
-                std::string senderName  = content.substr(0, sepPos);
-                std::string poseDataStr = content.substr(sepPos + POSE_MARKER.size());
-                LL_WARNS("FSPoserShare") << "sender=" << senderName << " poseData length=" << poseDataStr.size() << " first64=" << poseDataStr.substr(0, 64) << LL_ENDL;
+                // content = "senderName|targetUUID|!!FSPOSER!!data"
+                std::string senderAndUuid = content.substr(0, sepPos);
+                std::string poseDataStr   = content.substr(sepPos + POSE_MARKER.size());
+                size_t uuidSep = senderAndUuid.rfind('|');
+                std::string senderName;
+                std::string targetUuidStr;
+                if (uuidSep != std::string::npos)
+                {
+                    senderName    = senderAndUuid.substr(0, uuidSep);
+                    targetUuidStr = senderAndUuid.substr(uuidSep + 1);
+                }
+                else
+                {
+                    senderName    = senderAndUuid;  // legacy: no UUID
+                    targetUuidStr = "";
+                }
+                LL_WARNS("FSPoserShare") << "sender=" << senderName << " targetUUID=" << targetUuidStr << " poseData length=" << poseDataStr.size() << LL_ENDL;
 
                 // Parse compact format: "name:rx,ry,rz,rw[,px,py,pz[,sx,sy,sz]]" joints separated by '~'
                 LLSD data = LLSD::emptyArray();
@@ -620,32 +634,47 @@ bool FSLSLBridge::lslToViewer(std::string_view message, const LLUUID& fromID, co
                     LLSD args;
                     args["NAME"] = senderName;
                     LLNotificationsUtil::add("PoserReceiveSharedPose", args,
-                        LLSD().with("pose_data", data).with("sender_name", senderName),
+                        LLSD().with("pose_data", data).with("sender_name", senderName).with("target_uuid", targetUuidStr),
                         [](const LLSD& notification, const LLSD& response)
                         {
                             S32 option = LLNotificationsUtil::getSelectedOption(notification, response);
                             if (option == 0)
                             {
-                                std::string targetName = notification["payload"]["sender_name"].asString();
+                                std::string targetUuidStr = notification["payload"]["target_uuid"].asString();
+                                std::string nameFallback  = notification["payload"]["sender_name"].asString();
 
-                                // Find the sender's avatar on the receiver's screen
+                                // Find target avatar by UUID (primary), fall back to name
                                 LLVOAvatar* target = nullptr;
-                                for (LLCharacter* character : LLCharacter::sInstances)
+                                LLUUID targetUUID(targetUuidStr);
+                                if (targetUUID.notNull())
                                 {
-                                    LLVOAvatar* avatar = dynamic_cast<LLVOAvatar*>(character);
-                                    if (!avatar || avatar->isDead())
-                                        continue;
-
-                                    LLAvatarName av_name;
-                                    if (LLAvatarNameCache::get(avatar->getID(), &av_name))
+                                    for (LLCharacter* character : LLCharacter::sInstances)
                                     {
-                                        if (av_name.getDisplayName() == targetName)
+                                        if (character->getID() == targetUUID)
+                                        {
+                                            target = dynamic_cast<LLVOAvatar*>(character);
+                                            break;
+                                        }
+                                    }
+                                }
+                                // UUID lookup failed — fall back to name match
+                                if (!target && !nameFallback.empty())
+                                {
+                                    for (LLCharacter* character : LLCharacter::sInstances)
+                                    {
+                                        LLVOAvatar* avatar = dynamic_cast<LLVOAvatar*>(character);
+                                        if (!avatar || avatar->isDead())
+                                            continue;
+                                        LLAvatarName av_name;
+                                        if (LLAvatarNameCache::get(avatar->getID(), &av_name))
+                                        {
+                                            if (av_name.getDisplayName() == nameFallback)
+                                            { target = avatar; break; }
+                                        }
+                                        if (avatar->getFullname() == nameFallback)
                                         { target = avatar; break; }
                                     }
-                                    if (avatar->getFullname() == targetName)
-                                    { target = avatar; break; }
                                 }
-
                                 if (target)
                                 {
                                     FSPoserAnimator animator;
@@ -667,31 +696,57 @@ bool FSLSLBridge::lslToViewer(std::string_view message, const LLUUID& fromID, co
         size_t endPos = message.find(END_TAG);
         if (endPos != std::string::npos)
         {
-            std::string senderName = static_cast<std::string>(message.substr(tag.size(), endPos - tag.size()));
+            std::string content = static_cast<std::string>(message.substr(tag.size(), endPos - tag.size()));
 
-            // Find sender's avatar and clear pose modifiers
-            for (LLCharacter* character : LLCharacter::sInstances)
+            // Format: "senderName|targetUUID" (new) or just "senderName" (legacy)
+            std::string senderName;
+            std::string targetUuidStr;
+            size_t pipePos = content.find('|');
+            if (pipePos != std::string::npos)
             {
-                LLVOAvatar* avatar = dynamic_cast<LLVOAvatar*>(character);
-                if (!avatar || avatar->isDead())
-                    continue;
+                senderName    = content.substr(0, pipePos);
+                targetUuidStr = content.substr(pipePos + 1);
+            }
+            else
+            {
+                senderName    = content;
+                targetUuidStr = "";
+            }
 
-                LLAvatarName av_name;
-                if (LLAvatarNameCache::get(avatar->getID(), &av_name))
+            // Find avatar by UUID (primary), fall back to name match
+            LLVOAvatar* target = nullptr;
+            LLUUID targetUUID(targetUuidStr);
+            if (targetUUID.notNull())
+            {
+                for (LLCharacter* character : LLCharacter::sInstances)
                 {
-                    if (av_name.getDisplayName() == senderName)
+                    if (character->getID() == targetUUID)
                     {
-                        FSPoserAnimator animator;
-                        animator.stopPosingAvatar(avatar);
+                        target = dynamic_cast<LLVOAvatar*>(character);
                         break;
                     }
                 }
-                if (avatar->getFullname() == senderName)
+            }
+            if (!target && !senderName.empty())
+            {
+                for (LLCharacter* character : LLCharacter::sInstances)
                 {
-                    FSPoserAnimator animator;
-                    animator.stopPosingAvatar(avatar);
-                    break;
+                    LLVOAvatar* avatar = dynamic_cast<LLVOAvatar*>(character);
+                    if (!avatar || avatar->isDead()) continue;
+                    LLAvatarName av_name;
+                    if (LLAvatarNameCache::get(avatar->getID(), &av_name))
+                    {
+                        if (av_name.getDisplayName() == senderName)
+                        { target = avatar; break; }
+                    }
+                    if (avatar->getFullname() == senderName)
+                    { target = avatar; break; }
                 }
+            }
+            if (target)
+            {
+                FSPoserAnimator animator;
+                animator.stopPosingAvatar(target);
             }
         }
     }

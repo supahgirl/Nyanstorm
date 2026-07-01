@@ -35,6 +35,7 @@
 #include "llcommonutils.h"
 #include "llcontrolavatar.h"
 #include "lldiriterator.h"
+#include "llfloateravatarpicker.h"
 #include "llinventoryfunctions.h"
 #include "llloadingindicator.h"
 #include "llmutelist.h"
@@ -85,6 +86,8 @@ FSFloaterPoser::FSFloaterPoser(const LLSD& key) : LLFloater(key)
 {
     // Bind requests, other controls are find-and-binds, see postBuild()
     mCommitCallbackRegistrar.add("Poser.RefreshAvatars", [this](LLUICtrl*, const LLSD&) { onAvatarsRefresh(); });
+    mCommitCallbackRegistrar.add("Poser.AddAvatar", [this](LLUICtrl*, const LLSD&) { onAddAvatar(); });
+    mCommitCallbackRegistrar.add("Poser.RemoveAvatar", [this](LLUICtrl*, const LLSD&) { onRemoveAvatar(); });
     mCommitCallbackRegistrar.add("Poser.StartStopAnimating", [this](LLUICtrl*, const LLSD&) { onPoseStartStop(); });
     mCommitCallbackRegistrar.add("Poser.SharePose", [this](LLUICtrl*, const LLSD&) { onSharePose(); });
     mCommitCallbackRegistrar.add("Poser.ToggleLoadSavePanel", [this](LLUICtrl*, const LLSD&) { onToggleLoadSavePanel(); });
@@ -1464,8 +1467,8 @@ void FSFloaterPoser::onPoseStartStop()
         mPoserAnimator.stopPosingAvatar(avatar);
 
         // Notify nearby viewers that we stopped posing — they should clear
-        // the sender's pose modifiers on their screens.
-        FSLSLBridge::instance().viewerToLSL("PoserShareClear|");
+        // the pose modifiers on their screens.
+        FSLSLBridge::instance().viewerToLSL(llformat("PoserShareClear|%s", avatar->getID().asString().c_str()));
     }
     else
     {
@@ -1525,7 +1528,7 @@ bool FSFloaterPoser::havePermissionToAnimateAvatar(LLVOAvatar* avatar) const
         return rootEditObject->permYouOwner();
     }
 
-    return false;
+    return true;
 }
 
 bool FSFloaterPoser::havePermissionToAnimateOtherAvatar(LLVOAvatar* avatar) const
@@ -2655,6 +2658,17 @@ void FSFloaterPoser::onAvatarsRefresh()
 
     for (LLUUID toRemove : avatarsToRemoveFromList)
     {
+        // Don't remove manually-added avatars (non-self, non-animesh)
+        bool isSelf = (toRemove == gAgentID);
+        bool isAnimesh = false;
+        for (auto character : LLCharacter::sInstances)
+        {
+            if (dynamic_cast<LLControlAvatar*>(character) && character->getID() == toRemove)
+            { isAnimesh = true; break; }
+        }
+        if (!isSelf && !isAnimesh)
+            continue;
+
         S32 indexToRemove = getAvatarListIndexForUuid(toRemove);
         if (indexToRemove >= 0)
             mAvatarSelectionScrollList->deleteSingleItem(indexToRemove);
@@ -2732,6 +2746,75 @@ void FSFloaterPoser::onAvatarsRefresh()
 
     mAvatarSelectionScrollList->updateLayout();
     refreshTextHighlightingOnAvatarScrollList();
+}
+
+void FSFloaterPoser::onAddAvatar()
+{
+    LLFloaterAvatarPicker::show(
+        [this](const uuid_vec_t& uuids, const std::vector<LLAvatarName>& names)
+        {
+            if (uuids.empty()) return;
+
+            LLUUID id = uuids[0];
+            // Don't add duplicates
+            for (const auto& item : mAvatarSelectionScrollList->getAllData())
+            {
+                if (item->getColumn(COL_UUID)->getValue().asUUID() == id)
+                    return;
+            }
+
+            // Find the avatar to get the right icon
+            std::string iconName = "Inv_BodyShape";
+            for (LLCharacter* character : LLCharacter::sInstances)
+            {
+                LLVOAvatar* avatar = dynamic_cast<LLVOAvatar*>(character);
+                if (!avatar || avatar->isDead()) continue;
+                if (avatar->getID() == id)
+                {
+                    iconName = getIconNameForAvatar(avatar);
+                    break;
+                }
+            }
+
+            LLSD row;
+            row["columns"][COL_ICON]["column"] = "icon";
+            row["columns"][COL_ICON]["type"]   = "icon";
+            row["columns"][COL_ICON]["value"]  = iconName;
+            row["columns"][COL_NAME]["column"] = "name";
+            row["columns"][COL_NAME]["value"]  = names[0].getDisplayName();
+            row["columns"][COL_UUID]["column"] = "uuid";
+            row["columns"][COL_UUID]["value"]  = id;
+            row["columns"][COL_SAVE]["column"] = "saveFileName";
+            row["columns"][COL_SAVE]["value"]  = "";
+            mAvatarSelectionScrollList->addElement(row);
+            mAvatarSelectionScrollList->updateLayout();
+            refreshTextHighlightingOnAvatarScrollList();
+        },
+        false,    // allow_multiple
+        true,     // closeOnSelect
+        false,    // skip_agent — false means includes self in the picker
+        getString("AddAvatarTitle"),  // name
+        this      // frustumOrigin
+    );
+}
+
+void FSFloaterPoser::onRemoveAvatar()
+{
+    LLVOAvatar* avatar = getUiSelectedAvatar();
+    if (!avatar || avatar->isDead())
+        return;
+
+    // Don't allow removing self
+    if (avatar->isSelf())
+        return;
+
+    S32 index = getAvatarListIndexForUuid(avatar->getID());
+    if (index >= 0)
+    {
+        mAvatarSelectionScrollList->deleteSingleItem(index);
+        mAvatarSelectionScrollList->updateLayout();
+        refreshTextHighlightingOnAvatarScrollList();
+    }
 }
 
 std::string FSFloaterPoser::getIconNameForAvatar(LLVOAvatar* avatar)
