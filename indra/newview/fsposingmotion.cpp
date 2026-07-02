@@ -93,16 +93,28 @@ bool FSPosingMotion::onUpdate(F32 time, U8* joint_mask)
 
     if (live)
     {
-        // Live overlay: set priority 0 AND mirror current joint state
-        // so Poser is transparent in blender. Animation wins.
+        // Live overlay: for joints the user has modified, set identity
+        // so the Poser doesn't contaminate the blend with last frame's
+        // onPostBlend output. Unmodified joints mirror normally.
         for (FSJointPose jointPose : mJointPoses)
         {
             LLJoint* joint = jointPose.getJointState()->getJoint();
             if (!joint) continue;
             jointPose.getJointState()->setPriority(LLJoint::LOW_PRIORITY);
-            jointPose.getJointState()->setRotation(joint->getRotation());
-            jointPose.getJointState()->setPosition(joint->getPosition());
-            jointPose.getJointState()->setScale(joint->getScale());
+            if (jointPose.getPublicRotation() != LLQuaternion::DEFAULT ||
+                !jointPose.getPublicPosition().isExactlyZero() ||
+                !jointPose.getPublicScale().isExactlyZero())
+            {
+                jointPose.getJointState()->setRotation(LLQuaternion::DEFAULT);
+                jointPose.getJointState()->setPosition(joint->getPosition());
+                jointPose.getJointState()->setScale(joint->getScale());
+            }
+            else
+            {
+                jointPose.getJointState()->setRotation(joint->getRotation());
+                jointPose.getJointState()->setPosition(joint->getPosition());
+                jointPose.getJointState()->setScale(joint->getScale());
+            }
         }
         return true;
     }
@@ -163,25 +175,27 @@ void FSPosingMotion::onPostBlend()
     if (!gSavedSettings.getBOOL("FSPoserLiveOverlay"))
         return;
 
-    for (FSJointPose jointPose : mJointPoses)
+    for (FSJointPose& jointPose : mJointPoses)
     {
         LLJoint* joint = jointPose.getJointState()->getJoint();
         if (!joint) continue;
 
-        // Read animation output from the blender
         LLQuaternion animRot = joint->getRotation();
         LLVector3    animPos = joint->getPosition();
-        LLVector3    animScl = joint->getScale();
-
-        LLQuaternion pubRot = jointPose.getPublicRotation();
+        LLQuaternion pubRot  = jointPose.getPublicRotation();
         if (pubRot != LLQuaternion::DEFAULT)
-            joint->setRotation(pubRot * animRot);
+        {
+            joint->setRotation(animRot * pubRot);
+            // Rotate animation position into user's frame too
+            joint->setPosition(animPos * pubRot);
+        }
 
-        LLVector3 pubPos = jointPose.getPublicPosition();
+        LLVector3 pubPos  = jointPose.getPublicPosition();
         if (!pubPos.isExactlyZero())
-            joint->setPosition(animPos + pubPos);
+            joint->setPosition(joint->getPosition() + pubPos);
 
-        LLVector3 pubScl = jointPose.getPublicScale();
+        LLVector3 animScl = joint->getScale();
+        LLVector3 pubScl  = jointPose.getPublicScale();
         if (!pubScl.isExactlyZero())
             joint->setScale(animScl.scaledVec(pubScl));
     }
