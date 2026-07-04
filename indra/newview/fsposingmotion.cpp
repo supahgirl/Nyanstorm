@@ -93,28 +93,18 @@ bool FSPosingMotion::onUpdate(F32 time, U8* joint_mask)
 
     if (live)
     {
-        // Live overlay: for joints the user has modified, set identity
-        // so the Poser doesn't contaminate the blend with last frame's
-        // onPostBlend output. Unmodified joints mirror normally.
+        // Live overlay: set priority 0 AND set joint state to the joint's
+        // REST rotation (not the animation-contaminated current rotation).
+        // This prevents the onPostBlend output from feeding back into the
+        // blender on the next frame.
         for (FSJointPose jointPose : mJointPoses)
         {
             LLJoint* joint = jointPose.getJointState()->getJoint();
             if (!joint) continue;
             jointPose.getJointState()->setPriority(LLJoint::LOW_PRIORITY);
-            if (jointPose.getPublicRotation() != LLQuaternion::DEFAULT ||
-                !jointPose.getPublicPosition().isExactlyZero() ||
-                !jointPose.getPublicScale().isExactlyZero())
-            {
-                jointPose.getJointState()->setRotation(LLQuaternion::DEFAULT);
-                jointPose.getJointState()->setPosition(joint->getPosition());
-                jointPose.getJointState()->setScale(joint->getScale());
-            }
-            else
-            {
-                jointPose.getJointState()->setRotation(joint->getRotation());
-                jointPose.getJointState()->setPosition(joint->getPosition());
-                jointPose.getJointState()->setScale(joint->getScale());
-            }
+            jointPose.getJointState()->setRotation(LLQuaternion::DEFAULT);
+            jointPose.getJointState()->setPosition(joint->getPosition());
+            jointPose.getJointState()->setScale(joint->getScale());
         }
         return true;
     }
@@ -183,16 +173,34 @@ void FSPosingMotion::onPostBlend()
         LLQuaternion animRot = joint->getRotation();
         LLVector3    animPos = joint->getPosition();
         LLQuaternion pubRot  = jointPose.getPublicRotation();
+
+        // Compute final rotation and position in one shot — no feedback
+        LLQuaternion finalRot = animRot;
+        LLVector3    finalPos = animPos;
         if (pubRot != LLQuaternion::DEFAULT)
         {
-            joint->setRotation(animRot * pubRot);
-            // Rotate animation position into user's frame too
-            joint->setPosition(animPos * pubRot);
+            // Pelvis has server animation driving animRot each frame,
+            // so animRot * pubRot plays animation in the user-rotated frame.
+            // Other bones may have no server animation — animRot is stale
+            // from the previous frame's onPostBlend output — so use pubRot
+            // directly to avoid feedback loops.
+            if (joint->getName() == "mPelvis")
+            {
+                finalRot = animRot * pubRot;
+                finalPos = animPos * pubRot;
+            }
+            else
+            {
+                finalRot = pubRot;
+            }
         }
 
-        LLVector3 pubPos  = jointPose.getPublicPosition();
+        LLVector3 pubPos = jointPose.getPublicPosition();
         if (!pubPos.isExactlyZero())
-            joint->setPosition(joint->getPosition() + pubPos);
+            finalPos = finalPos + pubPos;
+
+        joint->setRotation(finalRot);
+        joint->setPosition(finalPos);
 
         LLVector3 animScl = joint->getScale();
         LLVector3 pubScl  = jointPose.getPublicScale();
