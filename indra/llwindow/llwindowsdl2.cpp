@@ -529,7 +529,7 @@ static int x11_detect_VRAM_kb()
     FILE *fp;
     char *display_env = getenv("DISPLAY"); // e.g. :0 or :0.0 or :1.0 etc
     // parse DISPLAY number so we can go grab the right log file
-    if (display_env[0] == ':' &&
+    if (display_env && display_env[0] == ':' &&
         display_env[1] >= '0' && display_env[1] <= '9')
     {
         display_num = display_env[1] - '0';
