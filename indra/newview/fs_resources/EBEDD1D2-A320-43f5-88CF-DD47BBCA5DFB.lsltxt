@@ -44,7 +44,6 @@ key gAO_CollarKey;
 integer POSER_SHARE_CHANNEL = -777;
 integer gPoserShareListener;
 integer gPoseChunkTotal;
-integer gPoseChunksReceived;
 list    gPoseChunks;
 string  gPoseSenderName;
 key     gPoseSenderID;
@@ -741,7 +740,6 @@ default
                     if (seq == 0)
                     {
                         gPoseChunks         = [];
-                        gPoseChunksReceived = 0;
                         gPoseChunkTotal     = total;
                         gPoseSenderName     = chunkSenderName;
                         gPoseSenderID       = senderID;
@@ -753,14 +751,15 @@ default
                         while (llGetListLength(gPoseChunks) <= seq)
                             gPoseChunks += [""];
                         gPoseChunks = llListReplaceList(gPoseChunks, [chunk], seq, seq);
-                        gPoseChunksReceived++;
 
-                        if (gPoseChunksReceived >= total)
+                        // Assemble when all chunk slots are filled (non-empty).
+                        // Using list-length + no-empty-slots check avoids false
+                        // triggers from duplicate chunks that would inflate a simple counter.
+                        if (llGetListLength(gPoseChunks) >= total && llListFindList(gPoseChunks, [""]) < 0)
                         {
                             string assembled = llDumpList2String(gPoseChunks, "");
                             llOwnerSay("<sharedPose>" + gPoseSenderName + "|" + (string)gPoseTargetUUID + "|!!FSPOSER!!" + assembled + "</sharedPose>");
                             gPoseChunks         = [];
-                            gPoseChunksReceived = 0;
                             gPoseChunkTotal     = 0;
                             gPoseTargetUUID     = NULL_KEY;
                         }

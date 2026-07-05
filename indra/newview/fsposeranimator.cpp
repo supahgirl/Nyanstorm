@@ -25,6 +25,8 @@
  */
 
 #include <boost/algorithm/string.hpp>
+#include <iomanip>
+#include <sstream>
 #include "fsposeranimator.h"
 #include "fslslbridge.h"
 #include "llavatarnamecache.h"
@@ -34,6 +36,7 @@
 #include "llchat.h"
 #include "llsdserialize.h"
 #include "llviewercontrol.h"
+#include "llformat.h"
 #include "message.h"
 #include "fsposingmotion.h"
 
@@ -1549,6 +1552,15 @@ void FSPoserAnimator::sharePose(LLVOAvatar* avatar)
     //                   "name:rx,ry,rz,rw,px,py,pz" (with position)
     //                   "name:rx,ry,rz,rw,px,py,pz,sx,sy,sz" (with position and scale)
     // Joints separated by '~'. Floats at 5 decimal places.
+    // Locale-independent float formatter: forces '.' as decimal separator
+    // regardless of system locale, so the compact format is portable.
+    auto fmtf = [](F32 v) -> std::string {
+        std::ostringstream ss;
+        ss.imbue(std::locale::classic());
+        ss << std::fixed << std::setprecision(5) << v;
+        return ss.str();
+    };
+
     LLQuaternion identityRot(0.f, 0.f, 0.f, 1.f);
     std::string payload;
     for (LLSD::array_const_iterator it = allJoints.beginArray(); it != allJoints.endArray(); ++it)
@@ -1570,11 +1582,11 @@ void FSPoserAnimator::sharePose(LLVOAvatar* avatar)
             payload += '~';
         payload += e["n"].asString();
         payload += ':';
-        payload += llformat("%.5f,%.5f,%.5f,%.5f", rx, ry, rz, rw);
+        payload += fmtf(rx) + "," + fmtf(ry) + "," + fmtf(rz) + "," + fmtf(rw);
         if (hasPos || hasScale)
-            payload += llformat(",%.5f,%.5f,%.5f", px, py, pz);
+            payload += "," + fmtf(px) + "," + fmtf(py) + "," + fmtf(pz);
         if (hasScale)
-            payload += llformat(",%.5f,%.5f,%.5f", sx, sy, sz);
+            payload += "," + fmtf(sx) + "," + fmtf(sy) + "," + fmtf(sz);
     }
     if (payload.empty())
     {
@@ -1599,6 +1611,7 @@ void FSPoserAnimator::sharePose(LLVOAvatar* avatar)
     // Route through FS Bridge — viewerToLSL sends the payload to our own bridge,
     // which llShout's it on the target channel. This avoids ChatFromViewer's
     // negative-channel limitation.
+    LL_DEBUGS("FSPoserShare") << "sharePose: payload sample (first 200 chars): " << payload.substr(0, 200) << LL_ENDL;
     LL_WARNS("FSPoserShare") << "sharePose: sending " << payload.size() << " bytes via bridge on channel " << channel << " targetUUID=" << targetUuidStr << LL_ENDL;
     std::string bridgeMsg = llformat("PoserShare|%d|%s|%s|", channel, senderName.c_str(), targetUuidStr.c_str()) + payload;
     if (!FSLSLBridge::instance().viewerToLSL(bridgeMsg))

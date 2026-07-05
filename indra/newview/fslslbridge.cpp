@@ -27,6 +27,9 @@
 
 #include "llviewerprecompiledheaders.h"
 
+#include <sstream>
+#include <stdexcept>
+
 #include "fscommon.h"
 #include "fslslbridge.h"
 #include "fslslbridgerequest.h"
@@ -593,6 +596,18 @@ bool FSLSLBridge::lslToViewer(std::string_view message, const LLUUID& fromID, co
 
                 // Parse compact format: "name:rx,ry,rz,rw[,px,py,pz[,sx,sy,sz]]" joints separated by '~'
                 LLSD data = LLSD::emptyArray();
+
+                // Locale-independent float parser: forces '.' as decimal separator
+                // regardless of system locale, matching the sender's fmtf() output.
+                auto parseFloatLC = [](const std::string& s, float fallback = 0.f) -> float {
+                    std::istringstream ss(s);
+                    ss.imbue(std::locale::classic());
+                    float val = fallback;
+                    if (!(ss >> val))
+                        return fallback;
+                    return val;
+                };
+
                 size_t start = 0;
                 while (start < poseDataStr.size())
                 {
@@ -611,12 +626,21 @@ bool FSLSLBridge::lslToViewer(std::string_view message, const LLUUID& fromID, co
                     float v[10] = {0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f};
                     int idx = 0;
                     size_t vs = 0;
-                    while (idx < 10 && vs < vals.size())
+                    try
                     {
-                        size_t ve = vals.find(',', vs);
-                        if (ve == std::string::npos) ve = vals.size();
-                        v[idx++] = std::stof(vals.substr(vs, ve - vs));
-                        vs = ve + 1;
+                        while (idx < 10 && vs < vals.size())
+                        {
+                            size_t ve = vals.find(',', vs);
+                            if (ve == std::string::npos) ve = vals.size();
+                            v[idx] = parseFloatLC(vals.substr(vs, ve - vs), (idx == 3) ? 1.f : 0.f);
+                            ++idx;
+                            vs = ve + 1;
+                        }
+                    }
+                    catch (const std::exception& e)
+                    {
+                        LL_WARNS("FSPoserShare") << "Error parsing joint '" << name << "': " << e.what() << LL_ENDL;
+                        continue; // skip this joint
                     }
 
                     LLSD entry;
@@ -631,6 +655,10 @@ bool FSLSLBridge::lslToViewer(std::string_view message, const LLUUID& fromID, co
                 LL_WARNS("FSPoserShare") << "Parsed " << data.size() << " joints" << LL_ENDL;
                 if (data.size() > 0)
                 {
+                    // Log first joint for cross-platform diagnostics
+                    LL_DEBUGS("FSPoserShare") << "First joint: n=" << data[0]["n"].asString()
+                        << " rx=" << data[0]["rx"].asReal() << " ry=" << data[0]["ry"].asReal()
+                        << " rz=" << data[0]["rz"].asReal() << " rw=" << data[0]["rw"].asReal() << LL_ENDL;
                     LLSD args;
                     args["NAME"] = senderName;
                     LLNotificationsUtil::add("PoserReceiveSharedPose", args,
